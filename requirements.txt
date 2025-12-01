@@ -1,0 +1,4 @@
+playwright>=1.40.0
+python-pptx>=0.6.21
+Pillow>=10.0.0
+
