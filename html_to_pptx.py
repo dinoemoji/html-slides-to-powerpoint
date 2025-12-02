@@ -878,9 +878,56 @@ async def extract_elements_from_html(html_content: str):
                         const rows = [];
                         table.querySelectorAll('tr').forEach(tr => {
                             const cells = [];
-                            tr.querySelectorAll('th, td').forEach(cell => {
+                            tr.querySelectorAll('th, td').forEach((cell, cellIndex, allCells) => {
                                 const cellStyles = window.getComputedStyle(cell);
                                 const cellRect = cell.getBoundingClientRect();
+                                
+                                // Check for ::after pseudo-element (vertical separator on right)
+                                const afterStyles = window.getComputedStyle(cell, '::after');
+                                const hasAfterSeparator = afterStyles && afterStyles.content !== 'none' && afterStyles.width && parseFloat(afterStyles.width) > 0;
+                                
+                                // Extract color from ::after - handle gradients
+                                let afterColor = null;
+                                if (hasAfterSeparator) {
+                                    // Try background-color first
+                                    afterColor = parseColor(afterStyles.backgroundColor);
+                                    // If transparent or none, try to extract from background-image gradient
+                                    if ((!afterColor || afterColor.a === 0) && afterStyles.backgroundImage && afterStyles.backgroundImage !== 'none') {
+                                        // Extract first color from gradient
+                                        const gradientMatch = afterStyles.backgroundImage.match(/#([0-9a-fA-F]{6})|rgba?\\(([^)]+)\\)/);
+                                        if (gradientMatch) {
+                                            afterColor = parseColor(gradientMatch[0]);
+                                        }
+                                    }
+                                    // Fallback to gray if still no color
+                                    if (!afterColor || afterColor.a === 0) {
+                                        afterColor = { r: 176, g: 176, b: 176, a: 1 };
+                                    }
+                                }
+                                
+                                // Check for ::before pseudo-element (vertical separator on left)
+                                const beforeStyles = window.getComputedStyle(cell, '::before');
+                                const hasBeforeSeparator = beforeStyles && beforeStyles.content !== 'none' && beforeStyles.width && parseFloat(beforeStyles.width) > 0;
+                                
+                                // Extract color from ::before - handle gradients
+                                let beforeColor = null;
+                                if (hasBeforeSeparator) {
+                                    // Try background-color first
+                                    beforeColor = parseColor(beforeStyles.backgroundColor);
+                                    // If transparent or none, try to extract from background-image gradient
+                                    if ((!beforeColor || beforeColor.a === 0) && beforeStyles.backgroundImage && beforeStyles.backgroundImage !== 'none') {
+                                        // Extract first color from gradient
+                                        const gradientMatch = beforeStyles.backgroundImage.match(/#([0-9a-fA-F]{6})|rgba?\\(([^)]+)\\)/);
+                                        if (gradientMatch) {
+                                            beforeColor = parseColor(gradientMatch[0]);
+                                        }
+                                    }
+                                    // Fallback to gray if still no color
+                                    if (!beforeColor || beforeColor.a === 0) {
+                                        beforeColor = { r: 176, g: 176, b: 176, a: 1 };
+                                    }
+                                }
+                                
                                 cells.push({
                                     text: cell.textContent.trim(),
                                     is_header: cell.tagName.toLowerCase() === 'th',
@@ -892,7 +939,27 @@ async def extract_elements_from_html(html_content: str):
                                     bg_color: parseColor(cellStyles.backgroundColor),
                                     border_bottom_color: parseColor(cellStyles.borderBottomColor),
                                     border_bottom_width: parseFloat(cellStyles.borderBottomWidth),
-                                    border_bottom_style: cellStyles.borderBottomStyle
+                                    border_bottom_style: cellStyles.borderBottomStyle,
+                                    border_left_color: parseColor(cellStyles.borderLeftColor),
+                                    border_left_width: parseFloat(cellStyles.borderLeftWidth),
+                                    border_left_style: cellStyles.borderLeftStyle,
+                                    border_right_color: parseColor(cellStyles.borderRightColor),
+                                    border_right_width: parseFloat(cellStyles.borderRightWidth),
+                                    border_right_style: cellStyles.borderRightStyle,
+                                    border_top_color: parseColor(cellStyles.borderTopColor),
+                                    border_top_width: parseFloat(cellStyles.borderTopWidth),
+                                    border_top_style: cellStyles.borderTopStyle,
+                                    // Add synthetic borders for ::after and ::before pseudo-elements
+                                    pseudo_separator_right: hasAfterSeparator ? {
+                                        color: afterColor,
+                                        width: parseFloat(afterStyles.width) || 2,
+                                        style: 'dotted'
+                                    } : null,
+                                    pseudo_separator_left: hasBeforeSeparator ? {
+                                        color: beforeColor,
+                                        width: parseFloat(beforeStyles.width) || 2,
+                                        style: 'dotted'
+                                    } : null
                                 });
                             });
                             if (cells.length > 0) rows.push(cells);
@@ -2560,35 +2627,103 @@ def create_table_element(slide, elem):
                 bg_shape.line.fill.background()
                 bg_shape.shadow.inherit = False
             
+            # Helper function to create a border line
+            def create_border_line(x1, y1, x2, y2, color, width, style):
+                from pptx.enum.shapes import MSO_CONNECTOR
+                line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
+                r, g, b = blend_transparent_color(color, (255, 255, 255))
+                line.line.color.rgb = RGBColor(r, g, b)
+                line.line.width = Pt(px_to_pt(width))
+                
+                # Disable shadow to prevent "shadowy" appearance
+                line.shadow.inherit = False
+                
+                # Set dash style - use ROUND_DOT for better visibility of dotted lines
+                if style == 'dotted':
+                    line.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
+                elif style == 'dashed':
+                    line.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+                else:
+                    line.line.dash_style = MSO_LINE_DASH_STYLE.SOLID
+            
+            # Border bottom
             border_bottom_color = cell.get('border_bottom_color')
             if border_bottom_color and cell.get('border_bottom_width', 0) > 0:
-                from pptx.enum.shapes import MSO_CONNECTOR
-                line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(left), Inches(top + height), Inches(left + width), Inches(top + height))
-                # Blend transparent colors with white background
-                r, g, b = blend_transparent_color(border_bottom_color, (255, 255, 255))
-                line.line.color.rgb = RGBColor(r, g, b)
-                # Convert pixels to points for border width
-                line.line.width = Pt(px_to_pt(cell.get('border_bottom_width', 0)))
+                create_border_line(left, top + height, left + width, top + height,
+                                   border_bottom_color, cell.get('border_bottom_width', 0),
+                                   cell.get('border_bottom_style', 'solid'))
+            
+            # Border left
+            border_left_color = cell.get('border_left_color')
+            if border_left_color and cell.get('border_left_width', 0) > 0:
+                create_border_line(left, top, left, top + height,
+                                   border_left_color, cell.get('border_left_width', 0),
+                                   cell.get('border_left_style', 'solid'))
+            
+            # Border right
+            border_right_color = cell.get('border_right_color')
+            if border_right_color and cell.get('border_right_width', 0) > 0:
+                create_border_line(left + width, top, left + width, top + height,
+                                   border_right_color, cell.get('border_right_width', 0),
+                                   cell.get('border_right_style', 'solid'))
+            
+            # Border top
+            border_top_color = cell.get('border_top_color')
+            if border_top_color and cell.get('border_top_width', 0) > 0:
+                create_border_line(left, top, left + width, top,
+                                   border_top_color, cell.get('border_top_width', 0),
+                                   cell.get('border_top_style', 'solid'))
+            
+            # Pseudo-element separator on right (::after)
+            pseudo_right = cell.get('pseudo_separator_right')
+            if pseudo_right and pseudo_right.get('color'):
+                color = pseudo_right['color']
+                # Only render if color has opacity (not transparent)
+                if color.get('a', 0) > 0:
+                    create_border_line(left + width, top, left + width, top + height,
+                                       color, pseudo_right.get('width', 2),
+                                       pseudo_right.get('style', 'dotted'))
+            
+            # Pseudo-element separator on left (::before)
+            pseudo_left = cell.get('pseudo_separator_left')
+            if pseudo_left and pseudo_left.get('color'):
+                color = pseudo_left['color']
+                # Only render if color has opacity (not transparent)
+                if color.get('a', 0) > 0:
+                    create_border_line(left, top, left, top + height,
+                                       color, pseudo_left.get('width', 2),
+                                       pseudo_left.get('style', 'dotted'))
             
             textbox = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
             text_frame = textbox.text_frame
             text_frame.text = cell['text']
             text_frame.word_wrap = True
-            text_frame.margin_left = Inches(0.05)
-            text_frame.margin_right = Inches(0.05)
-            text_frame.margin_top = Inches(0.02)
-            text_frame.margin_bottom = Inches(0.02)
             
+            # Set margins and alignment
             paragraph = text_frame.paragraphs[0]
             alignment = cell.get('alignment', 'left')
             if alignment == 'center':
                 paragraph.alignment = PP_ALIGN.CENTER
+                # For centered text, use minimal margins for better visual centering
+                text_frame.margin_left = Inches(0.01)
+                text_frame.margin_right = Inches(0.01)
             elif alignment == 'right' or alignment == 'end':
                 paragraph.alignment = PP_ALIGN.RIGHT
+                # For right-aligned text, minimize right margin
+                text_frame.margin_left = Inches(0.05)
+                text_frame.margin_right = Inches(0.01)
             elif alignment == 'start':
                 paragraph.alignment = PP_ALIGN.LEFT
+                # For left-aligned text, minimize left margin
+                text_frame.margin_left = Inches(0.01)
+                text_frame.margin_right = Inches(0.05)
             else:
                 paragraph.alignment = PP_ALIGN.LEFT
+                text_frame.margin_left = Inches(0.01)
+                text_frame.margin_right = Inches(0.05)
+            
+            text_frame.margin_top = Inches(0.02)
+            text_frame.margin_bottom = Inches(0.02)
             
             if paragraph.runs:
                 run = paragraph.runs[0]
