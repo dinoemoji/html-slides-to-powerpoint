@@ -1010,6 +1010,7 @@ async def extract_elements_from_html(html_content: str):
                                     alignment: normalizeTextAlign(cellStyles.textAlign),
                                     font_size: parseFloat(cellStyles.fontSize),
                                     font_weight: cellStyles.fontWeight,
+                                    font_style: cellStyles.fontStyle,
                                     color: parseColor(cellStyles.color),
                                     bg_color: parseColor(cellStyles.backgroundColor),
                                     border_bottom_color: parseColor(cellStyles.borderBottomColor),
@@ -2710,6 +2711,8 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     font_name = {'Arial': 'Arial', 'Proxima Nova': 'Calibri', 'Roboto': 'Calibri'}.get(elem['font'].get('family', 'Arial'), 'Calibri')
     font_weight = str(elem['font']['weight'])
     is_bold = font_weight in ['bold', '700', '800', '900'] or (font_weight.isdigit() and int(font_weight) >= 700)
+    font_style = elem['font'].get('style', 'normal')
+    is_italic = font_style == 'italic'
     color = elem['color']
     
     for paragraph in text_frame.paragraphs:
@@ -2728,6 +2731,8 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
             run.font.name = font_name
             if is_bold:
                 run.font.bold = True
+            if is_italic:
+                run.font.italic = True
             # Blend transparent colors with white background
             r, g, b = blend_transparent_color(color, (255, 255, 255))
             run.font.color.rgb = RGBColor(r, g, b)
@@ -2869,8 +2874,21 @@ def create_table_element(slide, elem):
                 run = paragraph.runs[0]
                 run.font.size = Pt(int(cell.get('font_size', 12) * 0.75))
                 run.font.name = 'Calibri'
+                
+                # Apply bold based on is_header OR font_weight
                 if cell.get('is_header'):
                     run.font.bold = True
+                else:
+                    font_weight = str(cell.get('font_weight', 'normal'))
+                    is_bold = font_weight in ['bold', '700', '800', '900'] or (font_weight.isdigit() and int(font_weight) >= 700)
+                    if is_bold:
+                        run.font.bold = True
+                
+                # Apply italic if present
+                font_style = cell.get('font_style', 'normal')
+                if font_style == 'italic':
+                    run.font.italic = True
+                
                 color = cell.get('color', {'r': 0, 'g': 0, 'b': 0})
                 if color:
                     # Blend transparent colors with white background
@@ -3020,6 +3038,8 @@ def create_text_element(slide, elem, left, top, width, height):
     font_name = {'Arial': 'Arial', 'Calibri': 'Calibri', 'Times New Roman': 'Times New Roman'}.get(elem['font'].get('family', 'Arial'), 'Calibri')
     font_weight = str(elem['font']['weight'])
     is_bold = font_weight in ['bold', '700', '800', '900'] or (font_weight.isdigit() and int(font_weight) >= 700)
+    font_style = elem['font'].get('style', 'normal')
+    is_italic = font_style == 'italic'
     color = elem['color']
     text_gradient = elem.get('text_gradient')
     
@@ -3031,6 +3051,8 @@ def create_text_element(slide, elem, left, top, width, height):
             run.font.name = font_name
             if is_bold:
                 run.font.bold = True
+            if is_italic:
+                run.font.italic = True
             
             # Convert gradient text to solid fill using one of the gradient colors
             if text_gradient and text_gradient.get('stops'):
