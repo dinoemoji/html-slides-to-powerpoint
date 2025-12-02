@@ -256,6 +256,20 @@ async def extract_elements_from_html(html_content: str):
                         return null;
                     };
                     
+                    // Normalize CSS text-align values to PowerPoint-compatible values
+                    const normalizeTextAlign = (align, direction = 'ltr') => {
+                        if (!align) return 'left'; // Default to left
+                        const normalized = align.toLowerCase().trim();
+                        if (normalized === 'start') {
+                            return direction === 'rtl' ? 'right' : 'left';
+                        }
+                        if (normalized === 'end') {
+                            return direction === 'rtl' ? 'left' : 'right';
+                        }
+                        // Return as-is if already a standard value (left, center, right, justify)
+                        return normalized;
+                    };
+                    
                     const parseGradient = (gradientStr, bgColor = null) => {
                         if (!gradientStr || !gradientStr.includes('gradient')) return null;
                         
@@ -788,7 +802,7 @@ async def extract_elements_from_html(html_content: str):
                                     style: styles.fontStyle
                                 },
                                 color: textColor,
-                                alignment: styles.textAlign,
+                                alignment: normalizeTextAlign(styles.textAlign),
                                 border_color: borderColor,
                                 border_width: borderWidth,
                                 text_gradient: textGradient
@@ -817,7 +831,7 @@ async def extract_elements_from_html(html_content: str):
                                     style: styles.fontStyle
                                 },
                                 color: textColor,
-                                alignment: styles.textAlign,
+                                alignment: normalizeTextAlign(styles.textAlign),
                                 fill_color: bgColor,
                                 gradient: gradient,
                                 border_radius: borderRadiusValue,
@@ -871,7 +885,7 @@ async def extract_elements_from_html(html_content: str):
                                     text: cell.textContent.trim(),
                                     is_header: cell.tagName.toLowerCase() === 'th',
                                     coordinates: { x: cellRect.left, y: cellRect.top, width: cellRect.width, height: cellRect.height },
-                                    alignment: cellStyles.textAlign,
+                                    alignment: normalizeTextAlign(cellStyles.textAlign),
                                     font_size: parseFloat(cellStyles.fontSize),
                                     font_weight: cellStyles.fontWeight,
                                     color: parseColor(cellStyles.color),
@@ -1149,7 +1163,7 @@ async def extract_elements_from_html(html_content: str):
                                                 style: styles.fontStyle
                                             },
                                             color: textColor,
-                                            alignment: styles.textAlign,
+                                            alignment: normalizeTextAlign(styles.textAlign),
                                             border_color: borderColor,
                                             border_width: borderWidth,
                                             text_gradient: textGradient
@@ -1268,7 +1282,7 @@ async def extract_elements_from_html(html_content: str):
                                         style: styles.fontStyle
                                     },
                                     color: textColor,
-                                    alignment: styles.textAlign,
+                                    alignment: normalizeTextAlign(styles.textAlign),
                                     border_color: borderColor,
                                     border_width: borderWidth,
                                     text_gradient: finalGradient
@@ -1288,7 +1302,7 @@ async def extract_elements_from_html(html_content: str):
                                             style: styles.fontStyle
                                         },
                                         color: textColor,
-                                        alignment: styles.textAlign,
+                                        alignment: normalizeTextAlign(styles.textAlign),
                                         border_color: borderColor,
                                         border_width: borderWidth,
                                         text_gradient: segment.gradient || textGradient
@@ -1406,7 +1420,7 @@ async def extract_elements_from_html(html_content: str):
                                 style: styles.fontStyle
                             },
                             color: textColor,
-                            alignment: styles.textAlign,
+                            alignment: normalizeTextAlign(styles.textAlign),
                             border_color: borderColor,
                             border_width: borderWidth,
                             text_gradient: textGradient
@@ -1470,7 +1484,7 @@ async def extract_elements_from_html(html_content: str):
                                 style: styles.fontStyle
                             },
                             color: textColor,
-                            alignment: styles.textAlign,
+                            alignment: normalizeTextAlign(styles.textAlign),
                             border_color: borderColor,
                             border_width: borderWidth
                         });
@@ -2502,8 +2516,16 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     color = elem['color']
     
     for paragraph in text_frame.paragraphs:
-        # Always center align for badges/pills
-        paragraph.alignment = PP_ALIGN.CENTER
+        # Use the alignment from the element, defaulting to center for small badges/pills
+        alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
+        stored_alignment = elem.get('alignment', 'center')
+        # For small badges/pills, always center; otherwise use stored alignment
+        text_content = elem.get('text', '').strip()
+        is_small_badge = len(text_content) <= 3 and coords.get('width', 0) <= 60 and coords.get('height', 0) <= 60
+        if is_small_badge:
+            paragraph.alignment = PP_ALIGN.CENTER
+        else:
+            paragraph.alignment = alignment_map.get(stored_alignment.lower() if isinstance(stored_alignment, str) else 'center', PP_ALIGN.CENTER)
         for run in paragraph.runs:
             run.font.size = Pt(elem['font']['size'])
             run.font.name = font_name
@@ -2561,8 +2583,10 @@ def create_table_element(slide, elem):
             alignment = cell.get('alignment', 'left')
             if alignment == 'center':
                 paragraph.alignment = PP_ALIGN.CENTER
-            elif alignment == 'right':
+            elif alignment == 'right' or alignment == 'end':
                 paragraph.alignment = PP_ALIGN.RIGHT
+            elif alignment == 'start':
+                paragraph.alignment = PP_ALIGN.LEFT
             else:
                 paragraph.alignment = PP_ALIGN.LEFT
             
@@ -2626,8 +2650,9 @@ def create_image_element(slide, elem, left, top, width, height):
                 header, encoded = img_src.split(',', 1)
                 img_data = base64.b64decode(encoded)
                 img_stream = io.BytesIO(img_data)
+                img_stream.seek(0)  # Reset stream position
                 pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                print(f"    ✓ Added data URI image")
+                print(f"    ✓ Added data URI image ({len(img_data)} bytes)")
             except Exception as e:
                 print(f"  Warning: Could not decode data URI image: {e}")
                 import traceback
@@ -2704,17 +2729,18 @@ def create_text_element(slide, elem, left, top, width, height):
     else:
         text_frame.vertical_anchor = MSO_ANCHOR.TOP
     
-    text_frame.margin_left = 0
-    text_frame.margin_right = 0
+    alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
+    # Always respect the alignment from the HTML/CSS, don't auto-center based on text length
+    text_alignment = alignment_map.get(elem.get('alignment', 'left'), PP_ALIGN.LEFT)
+    
+    # Set margins based on alignment - PowerPoint needs small margins for proper text alignment
+    # Use small margin for left/right alignment to ensure text aligns properly
+    margin = Inches(0.01) if text_alignment in [PP_ALIGN.LEFT, PP_ALIGN.RIGHT] else Inches(0)
+    text_frame.margin_left = margin if text_alignment == PP_ALIGN.LEFT else 0
+    text_frame.margin_right = margin if text_alignment == PP_ALIGN.RIGHT else 0
     text_frame.margin_top = 0
     text_frame.margin_bottom = 0
     text_frame.auto_size = MSO_AUTO_SIZE.NONE
-    
-    alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY}
-    if len(elem['text'].strip()) <= 3:
-        text_alignment = PP_ALIGN.CENTER
-    else:
-        text_alignment = alignment_map.get(elem.get('alignment', 'left'), PP_ALIGN.LEFT)
     
     font_name = {'Arial': 'Arial', 'Calibri': 'Calibri', 'Times New Roman': 'Times New Roman'}.get(elem['font'].get('family', 'Arial'), 'Calibri')
     font_weight = str(elem['font']['weight'])
