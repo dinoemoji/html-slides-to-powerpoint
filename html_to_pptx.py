@@ -715,16 +715,21 @@ async def extract_elements_from_html(html_content: str):
                         // Extract border information for all four sides
                         const borderTopColor = parseColor(styles.borderTopColor);
                         const borderTopWidth = parseFloat(styles.borderTopWidth);
+                        const borderTopStyle = styles.borderTopStyle || 'solid';
                         const borderRightColor = parseColor(styles.borderRightColor);
                         const borderRightWidth = parseFloat(styles.borderRightWidth);
+                        const borderRightStyle = styles.borderRightStyle || 'solid';
                         const borderBottomColor = parseColor(styles.borderBottomColor);
                         const borderBottomWidth = parseFloat(styles.borderBottomWidth);
+                        const borderBottomStyle = styles.borderBottomStyle || 'solid';
                         const borderLeftColor = parseColor(styles.borderLeftColor);
                         const borderLeftWidth = parseFloat(styles.borderLeftWidth);
+                        const borderLeftStyle = styles.borderLeftStyle || 'solid';
                         
                         // For backward compatibility, use top border as default
                         const borderColor = borderTopColor;
                         const borderWidth = borderTopWidth;
+                        const borderStyle = borderTopStyle;
                         const borderRadius = parseFloat(styles.borderRadius) || 0;
                         // Ensure it's a valid number (handle NaN)
                         const borderRadiusValue = (isNaN(borderRadius) || !isFinite(borderRadius)) ? 0 : borderRadius;
@@ -741,6 +746,25 @@ async def extract_elements_from_html(html_content: str):
                         const isSquareish = aspectRatio > 0.8 && aspectRatio < 1.2;
                         const minDimension = Math.min(rect.width, rect.height);
                         const isCircle = isSquareish && borderRadius >= (minDimension / 2) * 0.9;
+                        
+                        // Check for CSS border triangles 
+                        // Pattern: small element, all borders present, some borders transparent (rgba(0,0,0,0))
+                        const hasTransparentBorder = (
+                            (borderTopColor && borderTopColor.a === 0) ||
+                            (borderRightColor && borderRightColor.a === 0) ||
+                            (borderBottomColor && borderBottomColor.a === 0) ||
+                            (borderLeftColor && borderLeftColor.a === 0)
+                        );
+                        const hasOpaqueBorder = (
+                            (borderTopColor && borderTopColor.a > 0) ||
+                            (borderRightColor && borderRightColor.a > 0) ||
+                            (borderBottomColor && borderBottomColor.a > 0) ||
+                            (borderLeftColor && borderLeftColor.a > 0)
+                        );
+                        const hasBorders = borderTopWidth > 0 || borderRightWidth > 0 || 
+                                          borderBottomWidth > 0 || borderLeftWidth > 0;
+                        const isSmallElement = rect.width < 50 && rect.height < 50;
+                        const isCSSTriangle = isSmallElement && hasBorders && hasTransparentBorder && hasOpaqueBorder;
                         
                         const text = (el.innerText || el.textContent).trim();
                         const hasBlockChildren = el.querySelectorAll('div, p, h1, h2, h3, h4, h5, h6, li, ul, ol').length > 0;
@@ -837,10 +861,61 @@ async def extract_elements_from_html(html_content: str):
                                 border_radius: borderRadiusValue,
                                 border_color: borderColor,
                                 border_width: borderWidth,
+                                border_style: borderStyle,
                                 borders: borders
                             });
                             processedTextElements.add(el);
                             styledTextElements.add(el); // Track as styled_text element
+                        } else if (isCSSTriangle) {
+                            // Handle CSS border triangles (width=0, height=0 with borders creating triangles)
+                            // Determine triangle direction and size from borders
+                            let triangleColor = null;
+                            let triangleWidth = 0;
+                            let triangleHeight = 0;
+                            let triangleDirection = 'up'; // up, down, left, right
+                            
+                            // Check which border creates the triangle (the non-transparent one)
+                            if (borderBottomWidth > 0 && borderBottomColor && borderBottomColor.a > 0) {
+                                // Triangle pointing up (border-bottom is colored)
+                                triangleColor = borderBottomColor;
+                                triangleWidth = Math.max(borderLeftWidth, borderRightWidth) * 2;
+                                triangleHeight = borderBottomWidth;
+                                triangleDirection = 'up';
+                            } else if (borderTopWidth > 0 && borderTopColor && borderTopColor.a > 0) {
+                                // Triangle pointing down (border-top is colored)
+                                triangleColor = borderTopColor;
+                                triangleWidth = Math.max(borderLeftWidth, borderRightWidth) * 2;
+                                triangleHeight = borderTopWidth;
+                                triangleDirection = 'down';
+                            } else if (borderRightWidth > 0 && borderRightColor && borderRightColor.a > 0) {
+                                // Triangle pointing left (border-right is colored)
+                                triangleColor = borderRightColor;
+                                triangleWidth = borderRightWidth;
+                                triangleHeight = Math.max(borderTopWidth, borderBottomWidth) * 2;
+                                triangleDirection = 'left';
+                            } else if (borderLeftWidth > 0 && borderLeftColor && borderLeftColor.a > 0) {
+                                // Triangle pointing right (border-left is colored)
+                                triangleColor = borderLeftColor;
+                                triangleWidth = borderLeftWidth;
+                                triangleHeight = Math.max(borderTopWidth, borderBottomWidth) * 2;
+                                triangleDirection = 'right';
+                            }
+                            
+                            if (triangleColor && triangleWidth > 0 && triangleHeight > 0) {
+                                elements.push({
+                                    type: 'shape',
+                                    shape_type: 'triangle',
+                                    triangle_direction: triangleDirection,
+                                    coordinates: { x: rect.left, y: rect.top, width: triangleWidth, height: triangleHeight },
+                                    fill_color: triangleColor,
+                                    gradient: null,
+                                    border_radius: 0,
+                                    border_color: null,
+                                    border_width: 0,
+                                    borders: null,
+                                    is_circle: false
+                                });
+                            }
                         } else if ((bgColor && bgColor.a >= 0) || gradient || (borderColor && borderWidth > 0) || 
                                    (borders.left && borders.left.width > 0) || 
                                    (borders.right && borders.right.width > 0) || 
@@ -2125,6 +2200,7 @@ def create_shape_element(slide, elem, left, top, width, height):
     """Create a shape element."""
     coords = elem['coordinates']
     is_circle = elem.get('is_circle', False)
+    shape_type = elem.get('shape_type', 'rectangle')
     border_radius_raw = elem.get('border_radius', 0)
     # Ensure border_radius is a valid number
     try:
@@ -2134,7 +2210,25 @@ def create_shape_element(slide, elem, left, top, width, height):
     except (ValueError, TypeError):
         border_radius = 0.0
     
-    if is_circle:
+    # Handle triangles (CSS border triangles)
+    if shape_type == 'triangle':
+        triangle_direction = elem.get('triangle_direction', 'up')
+        # Map triangle direction to PowerPoint shape
+        if triangle_direction == 'up':
+            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
+            # Rotate to point up (default points up, so no rotation needed)
+        elif triangle_direction == 'down':
+            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
+            shape.rotation = 180
+        elif triangle_direction == 'left':
+            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
+            shape.rotation = 270
+        elif triangle_direction == 'right':
+            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
+            shape.rotation = 90
+        else:
+            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
+    elif is_circle:
         shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(left), Inches(top), Inches(width), Inches(height))
     elif border_radius > 0:
         # Apply border radius - extract from HTML and convert directly
@@ -2193,8 +2287,8 @@ def create_shape_element(slide, elem, left, top, width, height):
                 shape.fill.background()
     
     # Apply borders - check for individual side borders first
-    borders = elem.get('borders', {})
-    has_individual_borders = any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
+    borders = elem.get('borders') or {}
+    has_individual_borders = borders and any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
     
     if has_individual_borders:
         # Remove border from shape first to avoid grey border
@@ -2435,7 +2529,24 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     borders = elem.get('borders', {})
     has_individual_borders = any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
     
+    # Check if all borders are identical - if so, use uniform border with dash style support
+    all_borders_same = False
     if has_individual_borders:
+        top = borders.get('top')
+        right = borders.get('right')
+        bottom = borders.get('bottom')
+        left = borders.get('left')
+        
+        # All four borders must exist and be identical in width and color
+        if all([top, right, bottom, left]):
+            all_same_width = (top.get('width') == right.get('width') == 
+                            bottom.get('width') == left.get('width'))
+            all_same_color = (top.get('color') == right.get('color') == 
+                            bottom.get('color') == left.get('color'))
+            all_borders_same = all_same_width and all_same_color
+    
+    # If borders are not all the same, use individual border rendering
+    if has_individual_borders and not all_borders_same:
         # Remove border from shape first to avoid grey border
         shape.line.fill.background()
         
@@ -2546,22 +2657,41 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
     else:
-        # Fallback to uniform border for backward compatibility
-        border_color = elem.get('border_color')
-        border_width = elem.get('border_width', 0)
+        # Use uniform border (either all borders are the same, or using border_color/border_width)
+        # If all borders are the same, use the first one; otherwise use border_color/border_width
+        if all_borders_same and has_individual_borders:
+            first_border = borders.get('top') or borders.get('left') or borders.get('bottom') or borders.get('right')
+            border_color = first_border.get('color') if first_border else elem.get('border_color')
+            border_width = first_border.get('width', 0) if first_border else elem.get('border_width', 0)
+            border_style = elem.get('border_style', 'solid')
+        else:
+            # Fallback to uniform border for backward compatibility
+            border_color = elem.get('border_color')
+            border_width = elem.get('border_width', 0)
+            border_style = elem.get('border_style', 'solid')
+        
         if border_color and border_width > 0:
             # Blend transparent colors with white background
             r, g, b = blend_transparent_color(border_color, (255, 255, 255))
             shape.line.color.rgb = RGBColor(r, g, b)
             # Convert pixels to points for border width
             shape.line.width = Pt(px_to_pt(border_width))
+            
+            # Set dash style based on border style
+            if border_style == 'dotted':
+                shape.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
+            elif border_style == 'dashed':
+                shape.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+            else:
+                shape.line.dash_style = MSO_LINE_DASH_STYLE.SOLID
         else:
             shape.line.fill.background()
     
     shape.shadow.inherit = False
     
     text_frame = shape.text_frame
-    text_frame.word_wrap = False
+    # Enable word wrap for better text rendering in boxes
+    text_frame.word_wrap = True
     
     # Set equal margins for proper centering (PowerPoint sometimes needs small margins)
     margin = Inches(0.01)
@@ -2699,31 +2829,41 @@ def create_table_element(slide, elem):
             text_frame.text = cell['text']
             text_frame.word_wrap = True
             
+            # Set vertical alignment - center text vertically in cells
+            text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            
             # Set margins and alignment
             paragraph = text_frame.paragraphs[0]
             alignment = cell.get('alignment', 'left')
+            is_header = cell.get('is_header', False)
+            
+            # Headers typically need less side margin, more vertical margin for proper appearance
+            if is_header:
+                side_margin = Inches(0.05)  # Small but visible margin
+                vert_margin = Inches(0.03)  # Slightly more vertical space
+            else:
+                side_margin = Inches(0.05)
+                vert_margin = Inches(0.02)
+            
             if alignment == 'center':
                 paragraph.alignment = PP_ALIGN.CENTER
-                # For centered text, use minimal margins for better visual centering
-                text_frame.margin_left = Inches(0.01)
-                text_frame.margin_right = Inches(0.01)
+                text_frame.margin_left = side_margin
+                text_frame.margin_right = side_margin
             elif alignment == 'right' or alignment == 'end':
                 paragraph.alignment = PP_ALIGN.RIGHT
-                # For right-aligned text, minimize right margin
-                text_frame.margin_left = Inches(0.05)
-                text_frame.margin_right = Inches(0.01)
-            elif alignment == 'start':
-                paragraph.alignment = PP_ALIGN.LEFT
-                # For left-aligned text, minimize left margin
-                text_frame.margin_left = Inches(0.01)
+                text_frame.margin_left = side_margin
                 text_frame.margin_right = Inches(0.05)
+            elif alignment == 'start' or alignment == 'left':
+                paragraph.alignment = PP_ALIGN.LEFT
+                text_frame.margin_left = Inches(0.05)
+                text_frame.margin_right = side_margin
             else:
                 paragraph.alignment = PP_ALIGN.LEFT
-                text_frame.margin_left = Inches(0.01)
-                text_frame.margin_right = Inches(0.05)
+                text_frame.margin_left = Inches(0.05)
+                text_frame.margin_right = side_margin
             
-            text_frame.margin_top = Inches(0.02)
-            text_frame.margin_bottom = Inches(0.02)
+            text_frame.margin_top = vert_margin
+            text_frame.margin_bottom = vert_margin
             
             if paragraph.runs:
                 run = paragraph.runs[0]
