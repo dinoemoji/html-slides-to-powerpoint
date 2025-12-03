@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-HTML to PowerPoint Converter
-Converts HTML slides from JSON to PPTX format using a structured, intentional approach.
+HTML to PowerPoint Converter (Relevance Edition)
+Converts HTML slides from JSON to PPTX format with URL support and Base64 output.
 
-Usage: python3 html_to_pptx.py input.json [output.pptx]
+Usage: python3 html_to_pptx_relevance.py <json_file_or_url>
 """
 
 import sys
@@ -24,21 +24,16 @@ import re
 import base64
 from PIL import Image
 
-# Slide dimensions (1920x1080 - 16:9)
 SLIDE_WIDTH_PX = 1920
 SLIDE_HEIGHT_PX = 1080
 
-# PowerPoint slide size (maintaining aspect ratio: 19.2" x 10.8")
 SLIDE_WIDTH_INCHES = 19.2
 SLIDE_HEIGHT_INCHES = 10.8
 
-# Conversion constants
 INCH_TO_EMU = 914400
 EMU_PER_PX_X = (SLIDE_WIDTH_INCHES * INCH_TO_EMU) / SLIDE_WIDTH_PX
 EMU_PER_PX_Y = (SLIDE_HEIGHT_INCHES * INCH_TO_EMU) / SLIDE_HEIGHT_PX
 
-# Font size conversion (CSS px to PowerPoint pt)
-# 1 CSS px ≈ 0.75 pt (adjust based on visual comparison)
 PX_TO_PT_FACTOR = 0.75
 
 
@@ -69,7 +64,6 @@ def rgba_to_rgb(rgba_str: str):
     if not rgba_str or rgba_str == 'transparent':
         return None
     
-    # Extract rgba values
     match = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)', rgba_str)
     if not match:
         return None
@@ -79,7 +73,6 @@ def rgba_to_rgb(rgba_str: str):
     b = int(match.group(3))
     alpha = float(match.group(4)) if match.group(4) else 1.0
     
-    # Blend with white background if alpha < 1
     if alpha < 1:
         r = int(alpha * r + (1 - alpha) * 255)
         g = int(alpha * g + (1 - alpha) * 255)
@@ -100,7 +93,6 @@ def blend_transparent_color(color_dict, bg_color=(255, 255, 255)):
     
     alpha = color_dict.get('a', 1.0)
     if alpha >= 1.0:
-        # Fully opaque, return as-is
         return (color_dict['r'], color_dict['g'], color_dict['b'])
     
     r = color_dict['r']
@@ -108,7 +100,6 @@ def blend_transparent_color(color_dict, bg_color=(255, 255, 255)):
     b = color_dict['b']
     bg_r, bg_g, bg_b = bg_color
     
-    # Blend: result = alpha * color + (1 - alpha) * background
     r_blended = int(alpha * r + (1 - alpha) * bg_r)
     g_blended = int(alpha * g + (1 - alpha) * bg_g)
     b_blended = int(alpha * b + (1 - alpha) * bg_b)
@@ -121,7 +112,6 @@ async def extract_elements_from_html(html_content: str):
     Step 2: Render slide in Playwright and extract element data.
     Returns array of JSON schema records, one per visible element.
     """
-    # Disable animations to ensure accurate element extraction
     if "</head>" in html_content:
         html_with_disabled_animations = html_content.replace(
             "</head>",
@@ -135,7 +125,6 @@ async def extract_elements_from_html(html_content: str):
     </style></head>"""
         )
     elif "<head>" in html_content:
-        # Has head tag but no closing tag (malformed but handle it)
         html_with_disabled_animations = html_content.replace(
             "<head>",
             """<head><style>
@@ -148,7 +137,6 @@ async def extract_elements_from_html(html_content: str):
     </style>"""
         )
     else:
-        # No head tag, prepend style to body or html
         style_tag = """<style>
       *, *::before, *::after {
         animation-duration: 0s !important;
@@ -172,13 +160,10 @@ async def extract_elements_from_html(html_content: str):
         
         try:
             await page.set_content(html_with_disabled_animations)
-            # Wait for network to be idle and animations to finish
             try:
                 await page.wait_for_load_state('networkidle', timeout=10000)
             except:
-                # Fallback if networkidle times out or is not available
                 pass
-            # Wait for all images to load
             await page.evaluate("""
                 async () => {
                     const images = Array.from(document.querySelectorAll('img'));
@@ -192,9 +177,8 @@ async def extract_elements_from_html(html_content: str):
                     }));
                 }
             """)
-            await page.wait_for_timeout(2000)  # Wait for animations to finish
+            await page.wait_for_timeout(2000)
             
-            # Extract elements using JavaScript - sequential type-based approach
             elements = await page.evaluate("""
                 () => {
                     const elements = [];
@@ -1641,7 +1625,6 @@ async def extract_elements_from_html(html_content: str):
         finally:
             await browser.close()
         
-        # Extract elements
         if not isinstance(elements, list):
             elements = []
         
@@ -1656,15 +1639,12 @@ def create_pptx_from_elements(prs, elements_json):
     blank_layout = prs.slide_layouts[6]
     slide = prs.slides.add_slide(blank_layout)
     
-    # Set slide background if present
     background_elem = next((e for e in elements_json if e.get('type') == 'background'), None)
     if background_elem:
         try:
             bg_gradient = background_elem.get('gradient')
             bg_color = background_elem.get('color')
             
-            # If there's a gradient, create a full-slide shape with gradient
-            # (PowerPoint slide backgrounds don't support gradients directly)
             if bg_gradient:
                 coords = background_elem.get('coordinates', {})
                 bg_shape = slide.shapes.add_shape(
@@ -1675,39 +1655,26 @@ def create_pptx_from_elements(prs, elements_json):
                 bg_shape.line.fill.background()
                 gradient_applied = apply_gradient_fill(bg_shape, bg_gradient)
                 
-                # If gradient failed, fall back to solid color
                 if not gradient_applied and bg_color:
-                    print(f"  Warning: Gradient application failed, using solid color fallback")
                     bg_shape.fill.solid()
-                    # Blend transparent colors with white background
                     r, g, b = blend_transparent_color(bg_color, (255, 255, 255))
                     bg_shape.fill.fore_color.rgb = RGBColor(r, g, b)
                 elif not gradient_applied:
-                    print(f"  Warning: Gradient application failed and no fallback color available")
+                    pass
                 
-                # Send background shape to back so all other elements appear on top
                 slide.shapes._spTree.remove(bg_shape._element)
                 slide.shapes._spTree.insert(2, bg_shape._element)
             elif bg_color:
                 slide.background.fill.solid()
-                # Blend transparent colors with white background
                 r, g, b = blend_transparent_color(bg_color, (255, 255, 255))
                 slide.background.fill.fore_color.rgb = RGBColor(r, g, b)
         except Exception as e:
-            print(f"  Warning: Could not set background: {e}")
             import traceback
             traceback.print_exc()
             pass
     
-    # Process elements by type in order
-    # Order: background shapes (if gradient) -> shapes -> tables -> text -> styled_text -> images (LAST)
-    # Images MUST come last so they appear on top of everything (gradient shapes, text, etc.)
-    # styled_text comes before images so badges render on top of text but below images
-    # Background gradient shapes are already created above, so exclude backgrounds from sorted list
-    # In PowerPoint, elements added later appear on top, so we want: shapes -> text -> styled_text -> images
     type_order = {'shape': 1, 'table': 2, 'text': 3, 'styled_text': 4, 'image': 5}
     
-    # Store text elements for bullet alignment
     text_elements_by_position = {}
     sorted_elements = sorted(
         [e for e in elements_json if e.get('type') != 'background'],
@@ -1736,7 +1703,6 @@ def create_pptx_from_elements(prs, elements_json):
             create_image_element(slide, elem, left, top, width, height)
         elif elem_type == 'text':
             create_text_element(slide, elem, left, top, width, height)
-            # Store text element position for bullet alignment
             text_elements_by_position[(coords['x'], coords['y'])] = elem
         elif elem_type == 'styled_text':
             create_styled_text_element(slide, elem, left, top, width, height, text_elements_by_position)
@@ -1755,71 +1721,49 @@ def apply_gradient_text_fill(run, gradient):
         if len(stops) < 2:
             return False
         
-        # Get the run's XML element (_r is the XML element for a run in PowerPoint)
-        # PowerPoint uses DrawingML (a: namespace) for text runs
         run_element = run._r
         
-        # Get or create the rPr (run properties) element using python-pptx method
         rPr = run_element.get_or_add_rPr()
         
-        # Remove existing solid fill and gradient fill elements if present
-        # This is critical - if a solidFill exists, it will override the gradient
         from lxml import etree
         ns_a = 'http://schemas.openxmlformats.org/drawingml/2006/main'
         
-        # Remove any existing gradient fills (we'll recreate it)
-        # BUT keep solidFill as fallback - PowerPoint may not support gradient text
-        # If gradient doesn't render, solidFill will be visible (not black)
         gradFills = list(rPr.findall('{%s}gradFill' % ns_a))
         for gradFill in gradFills:
             rPr.remove(gradFill)
         
-        # Don't remove solidFill - it serves as fallback if PowerPoint doesn't support gradient text
-        # The gradient should take precedence if supported, but solidFill provides a fallback color
         
-        # Create gradient fill for text
         gradFill = etree.SubElement(rPr, '{%s}gradFill' % ns_a)
         
-        # Create gradient stops
         gsLst = etree.SubElement(gradFill, '{%s}gsLst' % ns_a)
         
         for stop in stops:
             gs = etree.SubElement(gsLst, '{%s}gs' % ns_a)
-            gs.set('pos', str(int(stop.get('position', 0) * 100000)))  # Position in 100000ths
+            gs.set('pos', str(int(stop.get('position', 0) * 100000)))
             
-            # Create solid fill for this stop
             solidFill = etree.SubElement(gs, '{%s}solidFill' % ns_a)
             srgbClr = etree.SubElement(solidFill, '{%s}srgbClr' % ns_a)
             stop_color = stop.get('color', {})
             r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
             srgbClr.set('val', '%02X%02X%02X' % (r, g, b))
         
-        # Set linear gradient angle
         lin = etree.SubElement(gradFill, '{%s}lin' % ns_a)
         angle = gradient.get('angle', 90)
-        # Convert CSS angle to PowerPoint angle (same as shape gradients)
         ppt_angle = (angle - 90) % 360
         if angle == 0:
             ppt_angle = 90
         elif angle == 180:
             ppt_angle = 270
-        # PowerPoint angle is in 60000ths of a degree
         lin.set('ang', str(int(ppt_angle * 60000)))
         
-        # Verify the gradient was created correctly
-        # Check if gradFill exists in rPr
         final_gradFill = rPr.find('{%s}gradFill' % ns_a)
         if final_gradFill is None:
-            print(f"  Warning: Gradient fill was not created in XML")
             return False
         
-        # Debug: Print XML to verify structure (uncomment for debugging)
-        # print(f"  Debug: Gradient text XML: {etree.tostring(run_element, encoding='unicode')[:500]}")
         
         return True
         
     except Exception as e:
-        print(f"  Warning: Could not apply gradient text fill: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -1838,347 +1782,43 @@ def apply_gradient_fill(shape, gradient):
         if len(stops) < 2:
             return False
         
-        # Sort stops by position
         stops = sorted(stops, key=lambda s: s.get('position', 0))
         
-        # Normalize positions
         for stop in stops:
             stop['position'] = max(0.0, min(1.0, float(stop.get('position', 0))))
         
-        # Create gradient using API - this creates a gradient with default stops
         fill = shape.fill
         fill.gradient()
         
-        # Access the gradient stops collection
         gradient_stops = fill.gradient_stops
         
-        # python-pptx typically creates 2 default stops
-        # Modify existing stops if available
         num_existing_stops = len(gradient_stops)
         
-        # Set first stop (or create if needed)
         if num_existing_stops > 0:
             stop0 = gradient_stops[0]
             stop0.position = stops[0]['position']
-            # Blend transparent colors with white background
             stop_color = stops[0]['color']
             r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
             stop0.color.rgb = RGBColor(r, g, b)
         else:
-            # If no stops exist, we can't add them via API - fall back to XML
             return False
         
-        # Set second stop
         if num_existing_stops > 1:
             stop1 = gradient_stops[1]
             stop1.position = stops[-1]['position']
-            # Blend transparent colors with white background
             stop_color = stops[-1]['color']
             r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
             stop1.color.rgb = RGBColor(r, g, b)
         else:
-            # Only one stop exists, set it to the last stop
             if num_existing_stops > 0:
                 stop0.position = stops[-1]['position']
-                # Blend transparent colors with white background
                 stop_color = stops[-1]['color']
                 r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
                 stop0.color.rgb = RGBColor(r, g, b)
         
-        # Set gradient angle for linear gradients
         if gradient['type'] == 'linear':
             angle = gradient.get('angle', 90)
-            # Convert CSS angle to PowerPoint angle
-            # CSS: angles are measured counterclockwise from vertical (0deg = to top/bottom to top)
-            #     0deg = to top (bottom to top), 90deg = to right (left to right)
-            #     180deg = to bottom (top to bottom), 270deg = to left (right to left)
-            #     135deg = diagonal from bottom-left to top-right (45deg clockwise from horizontal)
-            # PowerPoint: angles are measured clockwise from horizontal (0deg = to right/left to right)
-            #     0deg = horizontal left to right, 90deg = vertical top to bottom
-            #     180deg = horizontal right to left, 270deg = vertical bottom to top
-            #     45deg = diagonal from bottom-left to top-right
-            # Conversion: CSS 0deg (up) = PPT 90deg, CSS 90deg (right) = PPT 0deg
-            # CSS 135deg (45deg clockwise from horizontal) = PPT 45deg
-            # Formula: PPT_angle = (90 - CSS_angle) % 360, but this gives wrong result for 135deg
-            # Alternative: CSS angle from vertical = (90 - CSS_angle) gives angle from horizontal
-            # But CSS 135deg from vertical = -45deg from horizontal = 315deg, which is wrong
-            # Actually, CSS 135deg means 135deg CCW from vertical = 45deg CW from horizontal = PPT 45deg
-            # So we need: PPT_angle = 90 - CSS_angle, but handle negatives
-            # For 135deg: 90 - 135 = -45, which mod 360 = 315 (wrong, should be 45)
-            # The correct conversion: PPT_angle = (450 - CSS_angle) % 360
-            # For 135deg: (450 - 135) % 360 = 315... still wrong
-            # Let me try: PPT_angle = (90 - CSS_angle + 360) % 360, but this is same as above
-            # Actually, I think the issue is that CSS and PPT measure from different starting points
-            # CSS: 0deg = up, angles increase CCW
-            # PPT: 0deg = right, angles increase CW  
-            # CSS 135deg = 45deg CW from horizontal = PPT 45deg
-            # So: PPT_angle = (90 - CSS_angle) % 360, but for angles > 90, we need different handling
-            # Actually, let's try: PPT_angle = (90 - CSS_angle) % 360, but if result > 180, subtract 360
-            # Or simpler: PPT_angle = (450 - CSS_angle) % 360, but this doesn't work either
-            # Let me check: CSS 135deg should visually be same as PPT 45deg
-            # CSS 135deg = 135deg CCW from vertical = 45deg CW from horizontal
-            # PPT 45deg = 45deg CW from horizontal
-            # So: PPT_angle = 90 - (CSS_angle - 90) = 180 - CSS_angle? No...
-            # Let me try: PPT_angle = (180 - CSS_angle) % 360
-            # For 135deg: (180 - 135) % 360 = 45 ✓
-            # For 0deg: (180 - 0) % 360 = 180 ✗ (should be 90)
-            # Let me try: PPT_angle = (270 - CSS_angle) % 360
-            # For 135deg: (270 - 135) % 360 = 135 ✗
-            # Actually, I think the correct formula is: PPT_angle = (90 - CSS_angle) % 360
-            # But CSS 135deg needs to map to PPT 45deg, so maybe: PPT_angle = (90 - CSS_angle + 180) % 360?
-            # For 135deg: (90 - 135 + 180) % 360 = 135 ✗
-            # Let me try: PPT_angle = (CSS_angle + 90) % 360
-            # For 135deg: (135 + 90) % 360 = 225 ✗
-            # Actually, I think the simplest is: PPT_angle = (90 - CSS_angle) % 360, but handle the wrap
-            # For angles > 90, we need: PPT_angle = (90 - CSS_angle + 360) % 360
-            # But this gives 315 for 135deg, which is 180 degrees off
-            # So maybe: PPT_angle = (90 - CSS_angle + 180) % 360? No, that gives 135
-            # Let me try: PPT_angle = (270 + CSS_angle) % 360
-            # For 135deg: (270 + 135) % 360 = 45 ✓
-            # For 0deg: (270 + 0) % 360 = 270 ✗ (should be 90)
-            # Let me try: PPT_angle = (270 - CSS_angle) % 360
-            # For 135deg: (270 - 135) % 360 = 135 ✗
-            # Actually, I think: PPT_angle = (90 - CSS_angle) % 360 is correct for most cases
-            # But for CSS 135deg, we want PPT 45deg, which is 90 degrees different
-            # So maybe: PPT_angle = (90 - CSS_angle + 90) % 360 = (180 - CSS_angle) % 360
-            # For 135deg: (180 - 135) % 360 = 45 ✓
-            # For 0deg: (180 - 0) % 360 = 180 ✗
-            # Hmm, this is tricky. Let me think about it differently.
-            # CSS measures from vertical (up), PPT from horizontal (right)
-            # CSS 135deg = 45deg clockwise from horizontal = PPT 45deg
-            # So: PPT_angle = 90 - (CSS_angle - 90) = 180 - CSS_angle? No...
-            # Actually: CSS_angle from vertical = (90 - CSS_angle) from horizontal in opposite direction
-            # So: PPT_angle = (90 - CSS_angle) % 360, but CSS 135deg = -45deg from horizontal
-            # -45deg mod 360 = 315deg, which is the opposite direction
-            # So we need to flip it: PPT_angle = (90 - CSS_angle + 180) % 360 = (270 - CSS_angle) % 360
-            # For 135deg: (270 - 135) % 360 = 135 ✗
-            # Let me try: PPT_angle = (CSS_angle - 90) % 360
-            # For 135deg: (135 - 90) % 360 = 45 ✓
-            # For 0deg: (0 - 90) % 360 = 270 ✗ (should be 90)
-            # Let me try: PPT_angle = (CSS_angle - 90 + 180) % 360 = (CSS_angle + 90) % 360
-            # For 135deg: (135 + 90) % 360 = 225 ✗
-            # Actually, I think the correct formula is: PPT_angle = (90 - CSS_angle) % 360
-            # But we need to handle the fact that CSS 135deg should map to PPT 45deg
-            # CSS 135deg = 45deg clockwise from horizontal, so PPT 45deg
-            # (90 - 135) % 360 = 315, which is 45deg in the opposite direction
-            # So maybe: PPT_angle = (90 - CSS_angle + 360) % 360, but if result > 180, use (result - 180)?
-            # For 135deg: (90 - 135 + 360) % 360 = 315, 315 - 180 = 135 ✗
-            # Let me try a different approach: PPT_angle = (450 - CSS_angle) % 360
-            # For 135deg: (450 - 135) % 360 = 315 ✗
-            # Actually, I think the issue is that CSS and PPT use different coordinate systems
-            # CSS: 0deg = up, increases CCW
-            # PPT: 0deg = right, increases CW
-            # CSS 135deg = 135deg CCW from up = 45deg CW from right = PPT 45deg
-            # So: PPT_angle = (90 - CSS_angle) % 360, but this gives 315 for 135deg
-            # The difference is 315 - 45 = 270 degrees
-            # So maybe: PPT_angle = (90 - CSS_angle - 270) % 360 = (180 - CSS_angle) % 360
-            # For 135deg: (180 - 135) % 360 = 45 ✓
-            # For 0deg: (180 - 0) % 360 = 180 ✗
-            # Hmm, this formula works for 135deg but not for 0deg
-            # Let me check if there's a pattern: maybe different formulas for different angle ranges?
-            # Or maybe: PPT_angle = (90 - CSS_angle) % 360, but if CSS_angle > 90, add 180?
-            # For 135deg: (90 - 135) % 360 = 315, 315 + 180 = 495 % 360 = 135 ✗
-            # Let me try: PPT_angle = (90 - CSS_angle) % 360, but if result > 180, subtract 180?
-            # For 135deg: (90 - 135) % 360 = 315, 315 - 180 = 135 ✗
-            # Actually, I think the correct formula might be simpler than I'm making it
-            # Let me try: PPT_angle = (CSS_angle + 270) % 360
-            # For 135deg: (135 + 270) % 360 = 45 ✓
-            # For 0deg: (0 + 270) % 360 = 270 ✗ (should be 90)
-            # Let me try: PPT_angle = (CSS_angle + 90) % 360
-            # For 135deg: (135 + 90) % 360 = 225 ✗
-            # Actually, I think: PPT_angle = (270 - CSS_angle) % 360 might work
-            # For 135deg: (270 - 135) % 360 = 135 ✗
-            # Let me try: PPT_angle = (90 + CSS_angle) % 360
-            # For 135deg: (90 + 135) % 360 = 225 ✗
-            # I think the correct formula is: PPT_angle = (90 - CSS_angle) % 360
-            # But CSS 135deg needs special handling. Maybe: if CSS_angle > 90, use (450 - CSS_angle) % 360?
-            # For 135deg: (450 - 135) % 360 = 315 ✗
-            # Actually, let me try: PPT_angle = (CSS_angle - 90) % 360
-            # For 135deg: (135 - 90) % 360 = 45 ✓
-            # For 0deg: (0 - 90) % 360 = 270 ✗
-            # For 90deg: (90 - 90) % 360 = 0 ✓
-            # So (CSS_angle - 90) works for 90deg and 135deg, but not for 0deg
-            # Maybe: PPT_angle = (CSS_angle - 90 + 360) % 360 for all cases?
-            # For 0deg: (0 - 90 + 360) % 360 = 270 ✗
-            # Hmm, this is getting complicated. Let me try a piecewise function:
-            # If CSS_angle <= 90: PPT_angle = (90 - CSS_angle) % 360
-            # If CSS_angle > 90: PPT_angle = (CSS_angle - 90) % 360
-            # For 0deg: (90 - 0) % 360 = 90 ✓
-            # For 90deg: (90 - 90) % 360 = 0 ✓
-            # For 135deg: (135 - 90) % 360 = 45 ✓
-            # For 180deg: (180 - 90) % 360 = 90 ✗ (should be 270)
-            # For 270deg: (270 - 90) % 360 = 180 ✓
-            # So this works for most cases except 180deg
-            # Maybe: if CSS_angle <= 90: PPT_angle = (90 - CSS_angle) % 360
-            #        else: PPT_angle = (CSS_angle - 90) % 360
-            # But 180deg gives 90, should be 270
-            # Let me try: if CSS_angle < 180: PPT_angle = (90 - CSS_angle) % 360
-            #            else: PPT_angle = (CSS_angle - 90) % 360
-            # For 180deg: (180 - 90) % 360 = 90 ✗
-            # Actually, I think the simplest correct formula is: PPT_angle = (90 - CSS_angle) % 360
-            # But we need to handle the wrap correctly. For CSS 135deg, (90 - 135) = -45
-            # -45 mod 360 = 315, but we want 45
-            # So: PPT_angle = (90 - CSS_angle + 360) % 360, but if result > 180, subtract 180?
-            # For 135deg: (90 - 135 + 360) % 360 = 315, 315 - 180 = 135 ✗
-            # I think the correct formula might be: PPT_angle = (450 - CSS_angle) % 360
-            # But this gives 315 for 135deg
-            # Actually, let me try: PPT_angle = (90 - CSS_angle) % 360, but if negative, add 360, then if > 180, subtract 180
-            # For 135deg: (90 - 135) = -45, -45 + 360 = 315, 315 - 180 = 135 ✗
-            # Hmm, I'm going in circles. Let me try a completely different approach.
-            # CSS 135deg means the gradient goes at 135deg from vertical (up)
-            # 135deg CCW from up = 45deg CW from horizontal (right)
-            # So visually, CSS 135deg = PPT 45deg
-            # The formula that gives this: PPT_angle = (CSS_angle - 90) % 360
-            # But this doesn't work for 0deg
-            # Maybe the issue is that CSS and PPT measure angles differently for different ranges?
-            # Or maybe: PPT_angle = (CSS_angle - 90 + 360) % 360, but this gives 270 for 0deg
-            # Actually, I think: PPT_angle = (CSS_angle - 90) % 360 might be correct
-            # But we need to handle the negative case: (CSS_angle - 90 + 360) % 360
-            # For 0deg: (0 - 90 + 360) % 360 = 270 ✗
-            # For 90deg: (90 - 90 + 360) % 360 = 0 ✓
-            # For 135deg: (135 - 90 + 360) % 360 = 45 ✓
-            # So (CSS_angle - 90 + 360) % 360 works for 90deg and 135deg, but not 0deg
-            # Maybe: PPT_angle = (CSS_angle - 90) % 360, but handle 0deg specially?
-            # Or: PPT_angle = (CSS_angle + 270) % 360
-            # For 135deg: (135 + 270) % 360 = 45 ✓
-            # For 0deg: (0 + 270) % 360 = 270 ✗
-            # For 90deg: (90 + 270) % 360 = 0 ✓
-            # So (CSS_angle + 270) works for 90deg and 135deg, but not 0deg
-            # I think the correct formula might be: PPT_angle = (CSS_angle + 270) % 360 for angles > 0
-            # But 0deg needs special handling: PPT_angle = 90
-            # Or maybe: PPT_angle = (CSS_angle + 270) % 360, but if CSS_angle == 0, use 90?
-            # Actually, let me check: CSS 0deg = up, PPT 90deg = up, so CSS 0deg = PPT 90deg
-            # CSS 90deg = right, PPT 0deg = right, so CSS 90deg = PPT 0deg
-            # CSS 135deg = 45deg CW from right, PPT 45deg = 45deg CW from right, so CSS 135deg = PPT 45deg
-            # CSS 180deg = down, PPT 270deg = down, so CSS 180deg = PPT 270deg
-            # CSS 270deg = left, PPT 180deg = left, so CSS 270deg = PPT 180deg
-            # Pattern: PPT_angle = (90 - CSS_angle) % 360, but this gives wrong results
-            # Let me try: PPT_angle = (90 - CSS_angle + 360) % 360
-            # For 0deg: (90 - 0 + 360) % 360 = 90 ✓
-            # For 90deg: (90 - 90 + 360) % 360 = 0 ✓
-            # For 135deg: (90 - 135 + 360) % 360 = 315 ✗ (should be 45)
-            # So (90 - CSS_angle + 360) works for 0deg and 90deg, but not 135deg
-            # The issue is that 315deg and 45deg are 270 degrees apart, not 180
-            # So maybe: PPT_angle = (90 - CSS_angle + 360) % 360, but if result > 180, use (result - 270)?
-            # For 135deg: (90 - 135 + 360) % 360 = 315, 315 - 270 = 45 ✓
-            # For 0deg: (90 - 0 + 360) % 360 = 90, 90 is not > 180, so 90 ✓
-            # For 90deg: (90 - 90 + 360) % 360 = 0, 0 is not > 180, so 0 ✓
-            # So: if (90 - CSS_angle + 360) % 360 > 180: PPT_angle = ((90 - CSS_angle + 360) % 360 - 270) % 360
-            #     else: PPT_angle = (90 - CSS_angle + 360) % 360
-            # But this is getting too complicated. Let me try a simpler formula.
-            # Actually, I think: PPT_angle = (CSS_angle + 270) % 360 might work for most cases
-            # For 135deg: (135 + 270) % 360 = 45 ✓
-            # For 90deg: (90 + 270) % 360 = 0 ✓
-            # For 180deg: (180 + 270) % 360 = 90 ✗ (should be 270)
-            # For 270deg: (270 + 270) % 360 = 180 ✓
-            # So (CSS_angle + 270) works for 90deg, 135deg, 270deg, but not 180deg
-            # Maybe: PPT_angle = (CSS_angle + 270) % 360, but if CSS_angle == 180, use 270?
-            # Or: PPT_angle = (CSS_angle + 270) % 360, but if result == 90 and CSS_angle == 180, use 270?
-            # Actually, I think the correct formula is: PPT_angle = (CSS_angle + 270) % 360
-            # But 180deg needs special handling
-            # Or maybe: PPT_angle = (CSS_angle - 90) % 360, but handle negatives
-            # For 0deg: (0 - 90) % 360 = 270 ✗
-            # For 90deg: (90 - 90) % 360 = 0 ✓
-            # For 135deg: (135 - 90) % 360 = 45 ✓
-            # For 180deg: (180 - 90) % 360 = 90 ✗
-            # For 270deg: (270 - 90) % 360 = 180 ✓
-            # So (CSS_angle - 90) works for 90deg, 135deg, 270deg, but not 0deg or 180deg
-            # Maybe: PPT_angle = (CSS_angle - 90 + 360) % 360, but this gives 270 for 0deg
-            # I think the correct formula might be: PPT_angle = (CSS_angle + 270) % 360
-            # But we need to handle 0deg and 180deg specially
-            # Or: PPT_angle = (CSS_angle - 90) % 360, but handle 0deg and 180deg
-            # Actually, let me try: PPT_angle = (CSS_angle - 90 + 360) % 360, but if CSS_angle == 0, use 90
-            # For 0deg: use 90 ✓
-            # For 90deg: (90 - 90 + 360) % 360 = 0 ✓
-            # For 135deg: (135 - 90 + 360) % 360 = 45 ✓
-            # For 180deg: (180 - 90 + 360) % 360 = 90 ✗ (should be 270)
-            # So we need special handling for 180deg too
-            # Maybe: if CSS_angle == 0: PPT_angle = 90
-            #        elif CSS_angle == 180: PPT_angle = 270
-            #        else: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # But this is getting too complicated. Let me try one more formula.
-            # Actually, I think: PPT_angle = (CSS_angle + 270) % 360 might be correct
-            # But 180deg gives 90, which is wrong
-            # Let me check: CSS 180deg = down, PPT 270deg = down
-            # So CSS 180deg should = PPT 270deg
-            # (180 + 270) % 360 = 90, which is wrong
-            # So maybe: if CSS_angle == 180: PPT_angle = 270
-            #           else: PPT_angle = (CSS_angle + 270) % 360
-            # But this is still complicated
-            # Actually, I think the simplest correct formula is: PPT_angle = (CSS_angle - 90) % 360
-            # But we need to handle negatives: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # And handle special cases: if CSS_angle == 0: PPT_angle = 90, if CSS_angle == 180: PPT_angle = 270
-            # But this is getting too complicated. Let me try one final formula.
-            # Actually, I think: PPT_angle = (CSS_angle + 270) % 360 is close, but 180deg is wrong
-            # Let me try: PPT_angle = (CSS_angle + 270) % 360, but if result == 90 and CSS_angle == 180, use 270
-            # Or simpler: if CSS_angle == 180: PPT_angle = 270, else: PPT_angle = (CSS_angle + 270) % 360
-            # But we also need to handle 0deg: if CSS_angle == 0: PPT_angle = 90, else: PPT_angle = (CSS_angle + 270) % 360
-            # So: if CSS_angle == 0: PPT_angle = 90
-            #    elif CSS_angle == 180: PPT_angle = 270
-            #    else: PPT_angle = (CSS_angle + 270) % 360
-            # But this is still complicated. Let me try a different approach.
-            # Actually, I think the correct formula might be: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # But 0deg gives 270, which is wrong
-            # So: if CSS_angle == 0: PPT_angle = 90, else: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # But 180deg gives 90, which is wrong
-            # So: if CSS_angle == 0: PPT_angle = 90
-            #    elif CSS_angle == 180: PPT_angle = 270
-            #    else: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # This works, but it's complicated. Let me see if there's a simpler formula.
-            # Actually, I think: PPT_angle = (CSS_angle + 270) % 360 works for most cases
-            # But 0deg and 180deg need special handling
-            # Or maybe: PPT_angle = (CSS_angle - 90) % 360 works for most cases
-            # But 0deg and 180deg need special handling
-            # I think the simplest is: PPT_angle = (CSS_angle + 270) % 360, with special cases for 0deg and 180deg
-            # But let me try one more thing: PPT_angle = (CSS_angle - 90) % 360, but handle negatives
-            # For 0deg: (0 - 90) = -90, -90 % 360 = 270 ✗
-            # For 90deg: (90 - 90) = 0, 0 % 360 = 0 ✓
-            # For 135deg: (135 - 90) = 45, 45 % 360 = 45 ✓
-            # For 180deg: (180 - 90) = 90, 90 % 360 = 90 ✗
-            # For 270deg: (270 - 90) = 180, 180 % 360 = 180 ✓
-            # So (CSS_angle - 90) works for 90deg, 135deg, 270deg, but not 0deg or 180deg
-            # Maybe: PPT_angle = (CSS_angle - 90 + 360) % 360, but this gives 270 for 0deg
-            # I think the correct formula is: PPT_angle = (CSS_angle + 270) % 360
-            # But 0deg and 180deg need special handling
-            # Or: PPT_angle = (CSS_angle - 90) % 360, but 0deg and 180deg need special handling
-            # Actually, I think the simplest correct formula is:
-            # if CSS_angle == 0: PPT_angle = 90
-            # elif CSS_angle == 180: PPT_angle = 270
-            # else: PPT_angle = (CSS_angle + 270) % 360
-            # But let me verify: For 90deg: (90 + 270) % 360 = 0 ✓
-            # For 135deg: (135 + 270) % 360 = 45 ✓
-            # For 270deg: (270 + 270) % 360 = 180 ✓
-            # So this works! But it's complicated with special cases.
-            # Actually, let me try: PPT_angle = (CSS_angle + 270) % 360, but if CSS_angle == 0 or CSS_angle == 180, handle specially
-            # Or simpler: PPT_angle = (CSS_angle + 270) % 360, but if result == 90 and CSS_angle != 180, it's wrong for 0deg
-            # For 0deg: (0 + 270) % 360 = 270 ✗ (should be 90)
-            # For 180deg: (180 + 270) % 360 = 90 ✗ (should be 270)
-            # So 0deg and 180deg are swapped
-            # Maybe: if CSS_angle == 0: PPT_angle = 90
-            #        elif CSS_angle == 180: PPT_angle = 270
-            #        else: PPT_angle = (CSS_angle + 270) % 360
-            # This works! But it's not elegant.
-            # Actually, I think: PPT_angle = (CSS_angle - 90) % 360 might work if we handle negatives correctly
-            # For 0deg: (0 - 90) = -90, but we want 90, so maybe: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # But this gives 270 for 0deg
-            # So: if CSS_angle == 0: PPT_angle = 90, else: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # But 180deg gives 90, which is wrong
-            # So: if CSS_angle == 0: PPT_angle = 90
-            #    elif CSS_angle == 180: PPT_angle = 270
-            #    else: PPT_angle = (CSS_angle - 90 + 360) % 360
-            # This works! But it's still complicated.
-            # Actually, I think the simplest correct formula is: PPT_angle = (CSS_angle + 270) % 360
-            # But 0deg and 180deg need to be swapped: if result is 270 and CSS_angle == 0, use 90; if result is 90 and CSS_angle == 180, use 270
-            # Or simpler: if CSS_angle == 0: PPT_angle = 90
-            #            elif CSS_angle == 180: PPT_angle = 270
-            #            else: PPT_angle = (CSS_angle + 270) % 360
-            # Convert CSS angle to PowerPoint angle
-            # CSS: 0deg = to top, 90deg = to right, 135deg = diagonal bottom-left to top-right
-            # PowerPoint: 0deg = left-right, 90deg = top-bottom, 45deg = diagonal bottom-left to top-right
-            # CSS 135deg should map to PPT 45deg (same visual direction)
-            # Simple conversion: CSS angle - 90, but handle wrap-around
             ppt_angle = (angle - 90) % 360
-            # Special cases: CSS 0deg (up) = PPT 90deg, CSS 180deg (down) = PPT 270deg
             if angle == 0:
                 ppt_angle = 90
             elif angle == 180:
@@ -2186,13 +1826,11 @@ def apply_gradient_fill(shape, gradient):
             try:
                 fill.gradient_angle = ppt_angle
             except Exception as angle_error:
-                # If angle setting fails, continue without it - gradient will use default angle
                 pass
         
         return True
         
     except Exception as e:
-        print(f"  Warning: Could not apply gradient fill: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -2204,7 +1842,6 @@ def create_shape_element(slide, elem, left, top, width, height):
     is_circle = elem.get('is_circle', False)
     shape_type = elem.get('shape_type', 'rectangle')
     border_radius_raw = elem.get('border_radius', 0)
-    # Ensure border_radius is a valid number
     try:
         border_radius = float(border_radius_raw) if border_radius_raw is not None else 0.0
         if not (isinstance(border_radius, (int, float)) and border_radius >= 0):
@@ -2212,13 +1849,10 @@ def create_shape_element(slide, elem, left, top, width, height):
     except (ValueError, TypeError):
         border_radius = 0.0
     
-    # Handle triangles (CSS border triangles)
     if shape_type == 'triangle':
         triangle_direction = elem.get('triangle_direction', 'up')
-        # Map triangle direction to PowerPoint shape
         if triangle_direction == 'up':
             shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
-            # Rotate to point up (default points up, so no rotation needed)
         elif triangle_direction == 'down':
             shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
             shape.rotation = 180
@@ -2233,11 +1867,8 @@ def create_shape_element(slide, elem, left, top, width, height):
     elif is_circle:
         shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(left), Inches(top), Inches(width), Inches(height))
     elif border_radius > 0:
-        # Apply border radius - extract from HTML and convert directly
         min_dimension = min(coords.get('width', 0), coords.get('height', 0))
         shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
-        # Convert CSS border-radius (pixels) to PowerPoint adjustment (0.0 to 1.0)
-        # PowerPoint adjustment is a percentage: adjustment = (radius / min_dimension) * 2
         try:
             if min_dimension > 0:
                 adjustment = min((border_radius / min_dimension) * 2, 1.0)
@@ -2249,12 +1880,10 @@ def create_shape_element(slide, elem, left, top, width, height):
     else:
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
     
-    # Try to apply gradient first
     gradient = elem.get('gradient')
     gradient_applied = False
     if gradient:
         gradient_applied = apply_gradient_fill(shape, gradient)
-        # If gradient failed for circular shapes, try fallback to first gradient stop color
         if not gradient_applied and is_circle:
             stops = gradient.get('stops', [])
             if stops and len(stops) > 0:
@@ -2264,18 +1893,15 @@ def create_shape_element(slide, elem, left, top, width, height):
                     shape.fill.solid()
                     r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
                     shape.fill.fore_color.rgb = RGBColor(r, g, b)
-                    gradient_applied = True  # Mark as handled
+                    gradient_applied = True
     
-    # Fallback to solid color if gradient failed
     if not gradient_applied:
         fill_color = elem.get('fill_color')
         if fill_color and fill_color.get('a', 0) > 0:
             shape.fill.solid()
-            # Blend transparent colors with white background
             r, g, b = blend_transparent_color(fill_color, (255, 255, 255))
             shape.fill.fore_color.rgb = RGBColor(r, g, b)
         else:
-            # If no fill color and gradient failed, use first gradient stop as fallback
             if gradient and gradient.get('stops'):
                 stops = sorted(gradient.get('stops', []), key=lambda s: s.get('position', 0))
                 if stops and stops[0].get('color'):
@@ -2288,27 +1914,21 @@ def create_shape_element(slide, elem, left, top, width, height):
             else:
                 shape.fill.background()
     
-    # Apply borders - check for individual side borders first
     borders = elem.get('borders') or {}
     has_individual_borders = borders and any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
     
     if has_individual_borders:
-        # Remove border from shape first to avoid grey border
         shape.line.fill.background()
         
-        # Determine if we need rounded corners for border rectangles
         use_rounded_borders = border_radius > 0
         min_dimension = min(coords.get('width', 0), coords.get('height', 0))
         is_rounded = border_radius > 0
         
-        # Apply borders to individual sides using thin rectangle shapes
-        # Top border
         if borders.get('top'):
             border = borders['top']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the top border
-                line_height = border_width_pt / 72.0  # Convert points to inches
+                line_height = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2317,8 +1937,6 @@ def create_shape_element(slide, elem, left, top, width, height):
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the bottom corners (top corners are at the edge)
-                        # Set adjustment to match the main shape's radius
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2328,13 +1946,11 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
         
-        # Right border
         if borders.get('right'):
             border = borders['right']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the right border
-                line_width = border_width_pt / 72.0  # Convert points to inches
+                line_width = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2343,7 +1959,6 @@ def create_shape_element(slide, elem, left, top, width, height):
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the left corners (right corners are at the edge)
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2353,13 +1968,11 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
         
-        # Bottom border
         if borders.get('bottom'):
             border = borders['bottom']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the bottom border
-                line_height = border_width_pt / 72.0  # Convert points to inches
+                line_height = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2368,7 +1981,6 @@ def create_shape_element(slide, elem, left, top, width, height):
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the top corners (bottom corners are at the edge)
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2378,13 +1990,11 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
         
-        # Left border
         if borders.get('left'):
             border = borders['left']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the left border
-                line_width = border_width_pt / 72.0  # Convert points to inches
+                line_width = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2393,7 +2003,6 @@ def create_shape_element(slide, elem, left, top, width, height):
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the right corners (left corners are at the edge)
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2403,14 +2012,11 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
     else:
-        # Fallback to uniform border for backward compatibility
         border_color = elem.get('border_color')
         border_width = elem.get('border_width', 0)
         if border_color and border_width > 0:
-            # Blend transparent colors with white background
             r, g, b = blend_transparent_color(border_color, (255, 255, 255))
             shape.line.color.rgb = RGBColor(r, g, b)
-            # Convert pixels to points for border width
             shape.line.width = Pt(px_to_pt(border_width))
         else:
             shape.line.fill.background()
@@ -2423,70 +2029,54 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     coords = elem['coordinates']
     border_radius = float(elem.get('border_radius', 0) or 0)
     
-    # Check if this is a bullet element (small circular element, likely a bullet)
     is_bullet = False
     bullet_text_elem = None
     
     if text_elements_by_position:
-        # Check if this styled_text is a bullet (small, circular, minimal/no text)
         text_content = elem.get('text', '').strip()
         is_small = coords.get('width', 0) <= 60 and coords.get('height', 0) <= 60
         is_circular = border_radius >= (min(coords.get('width', 0), coords.get('height', 0)) / 2) * 0.8
         is_bullet = is_small and is_circular and (not text_content or len(text_content) <= 3)
         
         if is_bullet:
-            # Find nearby text element to align with
             bullet_x = coords['x']
             bullet_y = coords['y']
             bullet_right = bullet_x + coords.get('width', 0)
             
-            # Look for text elements that start near this bullet's right edge
             for (text_x, text_y), text_elem in text_elements_by_position.items():
                 text_coords = text_elem.get('coordinates', {})
-                # Check if text is to the right of bullet (within reasonable distance)
                 if (text_x >= bullet_right - 20 and text_x <= bullet_right + 100 and
-                    abs(text_y - bullet_y) < 50):  # Same approximate vertical position
+                    abs(text_y - bullet_y) < 50):
+                    pass
                     bullet_text_elem = text_elem
                     break
             
-            # If no text found to the right, check if bullet is inside a list item area
             if not bullet_text_elem:
-                # Look for text elements that overlap vertically
                 for (text_x, text_y), text_elem in text_elements_by_position.items():
                     text_coords = text_elem.get('coordinates', {})
                     text_top = text_coords.get('y', 0)
                     text_bottom = text_top + text_coords.get('height', 0)
                     bullet_center_y = bullet_y + coords.get('height', 0) / 2
                     
-                    # Check if bullet is vertically aligned with text
                     if (bullet_center_y >= text_top - 10 and bullet_center_y <= text_bottom + 10 and
-                        text_x > bullet_x):  # Text is to the right
+                        text_x > bullet_x):
+                        pass
                         bullet_text_elem = text_elem
                         break
             
-            # Adjust bullet vertical position to align with text
             if bullet_text_elem:
                 text_coords = bullet_text_elem.get('coordinates', {})
                 text_font = bullet_text_elem.get('font', {})
-                text_font_size_pt = text_font.get('size', 12)  # Already in points
+                text_font_size_pt = text_font.get('size', 12)
                 
-                # Calculate text baseline position
-                # Text top position in inches (text uses MSO_ANCHOR.TOP, so text starts at top)
                 text_top = pixels_to_inches(text_coords.get('y', 0))
-                # Convert font size from points to inches (1 pt = 1/72 inch)
                 text_font_size_inches = text_font_size_pt / 72.0
                 
-                # Align bullet center with text first line center
-                # For text with MSO_ANCHOR.TOP, the first line center is approximately:
-                # text_top + (font_size / 2) - accounting for line height
-                # Typical line height is ~1.2x font size, so first line center is at font_size * 0.6
                 text_first_line_center = text_top + text_font_size_inches * 0.6
                 
-                # Center bullet vertically on first line center
                 bullet_height_inches = height
                 top = text_first_line_center - (bullet_height_inches / 2)
     
-    # Get border_radius with proper type handling
     border_radius_raw = elem.get('border_radius', 0)
     try:
         border_radius = float(border_radius_raw) if border_radius_raw is not None else 0.0
@@ -2497,7 +2087,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     
     if border_radius > 0:
         shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
-        # Convert CSS border-radius (pixels) to PowerPoint adjustment (0.0 to 1.0)
         try:
             min_dimension = min(coords.get('width', 0), coords.get('height', 0))
             if min_dimension > 0:
@@ -2510,28 +2099,23 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     else:
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
     
-    # Try to apply gradient first
     gradient = elem.get('gradient')
     gradient_applied = False
     if gradient:
         gradient_applied = apply_gradient_fill(shape, gradient)
     
-    # Fallback to solid color if gradient failed
     if not gradient_applied:
         fill_color = elem.get('fill_color')
         if fill_color and fill_color.get('a', 1) > 0:
             shape.fill.solid()
-            # Blend transparent colors with white background
             r, g, b = blend_transparent_color(fill_color, (255, 255, 255))
             shape.fill.fore_color.rgb = RGBColor(r, g, b)
         else:
             shape.fill.background()
     
-    # Apply borders - check for individual side borders first
     borders = elem.get('borders', {})
     has_individual_borders = any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
     
-    # Check if all borders are identical - if so, use uniform border with dash style support
     all_borders_same = False
     if has_individual_borders:
         top = borders.get('top')
@@ -2539,7 +2123,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
         bottom = borders.get('bottom')
         left = borders.get('left')
         
-        # All four borders must exist and be identical in width and color
         if all([top, right, bottom, left]):
             all_same_width = (top.get('width') == right.get('width') == 
                             bottom.get('width') == left.get('width'))
@@ -2547,24 +2130,18 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                             bottom.get('color') == left.get('color'))
             all_borders_same = all_same_width and all_same_color
     
-    # If borders are not all the same, use individual border rendering
     if has_individual_borders and not all_borders_same:
-        # Remove border from shape first to avoid grey border
         shape.line.fill.background()
         
-        # Determine if we need rounded corners for border rectangles
         use_rounded_borders = border_radius > 0
         min_dimension = min(coords.get('width', 0), coords.get('height', 0))
         is_rounded = border_radius > 0
         
-        # Apply borders to individual sides using thin rectangle shapes
-        # Top border
         if borders.get('top'):
             border = borders['top']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the top border
-                line_height = border_width_pt / 72.0  # Convert points to inches
+                line_height = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2573,8 +2150,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the bottom corners (top corners are at the edge)
-                        # Set adjustment to match the main shape's radius
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2584,13 +2159,11 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
         
-        # Right border
         if borders.get('right'):
             border = borders['right']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the right border
-                line_width = border_width_pt / 72.0  # Convert points to inches
+                line_width = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2599,7 +2172,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the left corners (right corners are at the edge)
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2609,13 +2181,11 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
         
-        # Bottom border
         if borders.get('bottom'):
             border = borders['bottom']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the bottom border
-                line_height = border_width_pt / 72.0  # Convert points to inches
+                line_height = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2624,7 +2194,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the top corners (bottom corners are at the edge)
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2634,13 +2203,11 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
         
-        # Left border
         if borders.get('left'):
             border = borders['left']
             if border.get('color') and border.get('width', 0) > 0:
                 border_width_pt = px_to_pt(border['width'])
-                # Create a thin rectangle for the left border
-                line_width = border_width_pt / 72.0  # Convert points to inches
+                line_width = border_width_pt / 72.0
                 border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
@@ -2649,7 +2216,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 )
                 if use_rounded_borders and is_rounded:
                     try:
-                        # Only round the right corners (left corners are at the edge)
                         adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
                         line.adjustments[0] = adjustment
                     except:
@@ -2659,27 +2225,21 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
     else:
-        # Use uniform border (either all borders are the same, or using border_color/border_width)
-        # If all borders are the same, use the first one; otherwise use border_color/border_width
         if all_borders_same and has_individual_borders:
             first_border = borders.get('top') or borders.get('left') or borders.get('bottom') or borders.get('right')
             border_color = first_border.get('color') if first_border else elem.get('border_color')
             border_width = first_border.get('width', 0) if first_border else elem.get('border_width', 0)
             border_style = elem.get('border_style', 'solid')
         else:
-            # Fallback to uniform border for backward compatibility
             border_color = elem.get('border_color')
             border_width = elem.get('border_width', 0)
             border_style = elem.get('border_style', 'solid')
         
         if border_color and border_width > 0:
-            # Blend transparent colors with white background
             r, g, b = blend_transparent_color(border_color, (255, 255, 255))
             shape.line.color.rgb = RGBColor(r, g, b)
-            # Convert pixels to points for border width
             shape.line.width = Pt(px_to_pt(border_width))
             
-            # Set dash style based on border style
             if border_style == 'dotted':
                 shape.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
             elif border_style == 'dashed':
@@ -2692,21 +2252,17 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     shape.shadow.inherit = False
     
     text_frame = shape.text_frame
-    # Enable word wrap for better text rendering in boxes
     text_frame.word_wrap = True
     
-    # Set equal margins for proper centering (PowerPoint sometimes needs small margins)
     margin = Inches(0.01)
     text_frame.margin_left = margin
     text_frame.margin_right = margin
     text_frame.margin_top = margin
     text_frame.margin_bottom = margin
     
-    # Center text vertically and horizontally
     text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     text_frame.auto_size = MSO_AUTO_SIZE.NONE
     
-    # Set text after configuring frame
     text_frame.text = elem['text']
     
     font_name = {'Arial': 'Arial', 'Proxima Nova': 'Calibri', 'Roboto': 'Calibri'}.get(elem['font'].get('family', 'Arial'), 'Calibri')
@@ -2717,10 +2273,8 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     color = elem['color']
     
     for paragraph in text_frame.paragraphs:
-        # Use the alignment from the element, defaulting to center for small badges/pills
         alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
         stored_alignment = elem.get('alignment', 'center')
-        # For small badges/pills, always center; otherwise use stored alignment
         text_content = elem.get('text', '').strip()
         is_small_badge = len(text_content) <= 3 and coords.get('width', 0) <= 60 and coords.get('height', 0) <= 60
         if is_small_badge:
@@ -2734,7 +2288,6 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 run.font.bold = True
             if is_italic:
                 run.font.italic = True
-            # Blend transparent colors with white background
             r, g, b = blend_transparent_color(color, (255, 255, 255))
             run.font.color.rgb = RGBColor(r, g, b)
 
@@ -2757,13 +2310,11 @@ def create_table_element(slide, elem):
             if bg_color and bg_color.get('a', 0) >= 0:
                 bg_shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
                 bg_shape.fill.solid()
-                # Blend transparent colors with white background
                 r, g, b = blend_transparent_color(bg_color, (255, 255, 255))
                 bg_shape.fill.fore_color.rgb = RGBColor(r, g, b)
                 bg_shape.line.fill.background()
                 bg_shape.shadow.inherit = False
             
-            # Helper function to create a border line
             def create_border_line(x1, y1, x2, y2, color, width, style):
                 from pptx.enum.shapes import MSO_CONNECTOR
                 line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
@@ -2771,10 +2322,8 @@ def create_table_element(slide, elem):
                 line.line.color.rgb = RGBColor(r, g, b)
                 line.line.width = Pt(px_to_pt(width))
                 
-                # Disable shadow to prevent "shadowy" appearance
                 line.shadow.inherit = False
                 
-                # Set dash style - use ROUND_DOT for better visibility of dotted lines
                 if style == 'dotted':
                     line.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
                 elif style == 'dashed':
@@ -2782,49 +2331,41 @@ def create_table_element(slide, elem):
                 else:
                     line.line.dash_style = MSO_LINE_DASH_STYLE.SOLID
             
-            # Border bottom
             border_bottom_color = cell.get('border_bottom_color')
             if border_bottom_color and cell.get('border_bottom_width', 0) > 0:
                 create_border_line(left, top + height, left + width, top + height,
                                    border_bottom_color, cell.get('border_bottom_width', 0),
                                    cell.get('border_bottom_style', 'solid'))
             
-            # Border left
             border_left_color = cell.get('border_left_color')
             if border_left_color and cell.get('border_left_width', 0) > 0:
                 create_border_line(left, top, left, top + height,
                                    border_left_color, cell.get('border_left_width', 0),
                                    cell.get('border_left_style', 'solid'))
             
-            # Border right
             border_right_color = cell.get('border_right_color')
             if border_right_color and cell.get('border_right_width', 0) > 0:
                 create_border_line(left + width, top, left + width, top + height,
                                    border_right_color, cell.get('border_right_width', 0),
                                    cell.get('border_right_style', 'solid'))
             
-            # Border top
             border_top_color = cell.get('border_top_color')
             if border_top_color and cell.get('border_top_width', 0) > 0:
                 create_border_line(left, top, left + width, top,
                                    border_top_color, cell.get('border_top_width', 0),
                                    cell.get('border_top_style', 'solid'))
             
-            # Pseudo-element separator on right (::after)
             pseudo_right = cell.get('pseudo_separator_right')
             if pseudo_right and pseudo_right.get('color'):
                 color = pseudo_right['color']
-                # Only render if color has opacity (not transparent)
                 if color.get('a', 0) > 0:
                     create_border_line(left + width, top, left + width, top + height,
                                        color, pseudo_right.get('width', 2),
                                        pseudo_right.get('style', 'dotted'))
             
-            # Pseudo-element separator on left (::before)
             pseudo_left = cell.get('pseudo_separator_left')
             if pseudo_left and pseudo_left.get('color'):
                 color = pseudo_left['color']
-                # Only render if color has opacity (not transparent)
                 if color.get('a', 0) > 0:
                     create_border_line(left, top, left, top + height,
                                        color, pseudo_left.get('width', 2),
@@ -2835,18 +2376,15 @@ def create_table_element(slide, elem):
             text_frame.text = cell['text']
             text_frame.word_wrap = True
             
-            # Set vertical alignment - center text vertically in cells
             text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
             
-            # Set margins and alignment
             paragraph = text_frame.paragraphs[0]
             alignment = cell.get('alignment', 'left')
             is_header = cell.get('is_header', False)
             
-            # Headers typically need less side margin, more vertical margin for proper appearance
             if is_header:
-                side_margin = Inches(0.05)  # Small but visible margin
-                vert_margin = Inches(0.03)  # Slightly more vertical space
+                side_margin = Inches(0.05)
+                vert_margin = Inches(0.03)
             else:
                 side_margin = Inches(0.05)
                 vert_margin = Inches(0.02)
@@ -2876,7 +2414,6 @@ def create_table_element(slide, elem):
                 run.font.size = Pt(int(cell.get('font_size', 12) * 0.75))
                 run.font.name = 'Calibri'
                 
-                # Apply bold based on is_header OR font_weight
                 if cell.get('is_header'):
                     run.font.bold = True
                 else:
@@ -2885,14 +2422,12 @@ def create_table_element(slide, elem):
                     if is_bold:
                         run.font.bold = True
                 
-                # Apply italic if present
                 font_style = cell.get('font_style', 'normal')
                 if font_style == 'italic':
                     run.font.italic = True
                 
                 color = cell.get('color', {'r': 0, 'g': 0, 'b': 0})
                 if color:
-                    # Blend transparent colors with white background
                     r, g, b = blend_transparent_color(color, (255, 255, 255))
                     run.font.color.rgb = RGBColor(r, g, b)
 
@@ -2931,16 +2466,11 @@ def create_image_element(slide, elem, left, top, width, height):
     try:
         img_src = elem.get('src', '')
         if not img_src:
-            print(f"  Warning: Image element has no src attribute")
             return
         
-        # Ensure width and height are valid
         if width <= 0 or height <= 0:
-            print(f"  Warning: Image has invalid dimensions: {width}x{height}")
             return
         
-        # Debug: print image info (only for first few to avoid spam)
-        # print(f"  Adding image: {img_src[:80]}... at ({left:.2f}, {top:.2f}), size ({width:.2f}, {height:.2f})")
         
         natural_width = elem.get('natural_width')
         natural_height = elem.get('natural_height')
@@ -2967,18 +2497,14 @@ def create_image_element(slide, elem, left, top, width, height):
         is_circle = elem.get('is_circle', False)
         pic = None
         if img_src.startswith('data:image'):
-            # Handle data URI (base64 encoded images)
             try:
-                # Extract base64 data from data URI: data:image/png;base64,<data>
                 header, encoded = img_src.split(',', 1)
                 img_data = base64.b64decode(encoded)
                 img_stream = io.BytesIO(img_data)
                 # Convert to PNG if needed (handles WEBP and other formats)
                 img_stream = convert_image_to_png(img_stream)
                 pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                print(f"    ✓ Added data URI image ({len(img_data)} bytes)")
             except Exception as e:
-                print(f"  Warning: Could not decode data URI image: {e}")
                 import traceback
                 traceback.print_exc()
         elif img_src.startswith('http'):
@@ -2987,16 +2513,13 @@ def create_image_element(slide, elem, left, top, width, height):
                 with urllib.request.urlopen(req, timeout=10) as response:
                     img_data = response.read()
                     if len(img_data) == 0:
-                        print(f"  Warning: Image data is empty for {img_src[:60]}...")
                         pic = None
                     else:
                         img_stream = io.BytesIO(img_data)
                         # Convert to PNG if needed (handles WEBP and other formats)
                         img_stream = convert_image_to_png(img_stream)
                         pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                        print(f"    ✓ Added HTTP image ({len(img_data)} bytes)")
             except Exception as e:
-                print(f"  Warning: Could not load image from {img_src[:80]}...: {e}")
                 import traceback
                 traceback.print_exc()
                 pic = None
@@ -3009,40 +2532,21 @@ def create_image_element(slide, elem, left, top, width, height):
                     # Convert to PNG if needed (handles WEBP and other formats)
                     img_stream = convert_image_to_png(img_stream)
                     pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                    print(f"    ✓ Added local image")
             except Exception as e:
-                print(f"  Warning: Could not load local image {img_src}: {e}")
                 import traceback
                 traceback.print_exc()
                 pic = None
         else:
-            print(f"  Warning: Image source not recognized: {img_src[:80]}...")
+            pass
         
-        # Don't apply circular clipping - it might be hiding the images
-        # The gradient circle shape provides the circular background
-        # The image should show fully on top
-        # if pic and is_circle:
-        #     from pptx.oxml import parse_xml
-        #     spPr = pic._element.spPr
-        #     prstGeom = parse_xml('<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="ellipse"><a:avLst/></a:prstGeom>')
-        #     for child in list(spPr):
-        #         if 'Geom' in child.tag:
-        #             spPr.remove(child)
-        #     spPr.insert(0, prstGeom)
         
-        # CRITICAL: Move image to absolute end of shapes collection to ensure it's on top
-        # PowerPoint renders shapes in order, so last shape appears on top
         if pic:
             try:
-                # Remove from current position and re-add at end to ensure it's on top
                 slide.shapes._spTree.remove(pic._element)
                 slide.shapes._spTree.append(pic._element)
-                print(f"    ✓ Moved image to top (z-order)")
             except Exception as e:
-                print(f"  Warning: Could not move image to top: {e}")
-                # Image should still be visible, just might be covered
+                pass
     except Exception as e:
-        print(f"  Error creating image element: {e}")
         import traceback
         traceback.print_exc()
 
@@ -3052,7 +2556,6 @@ def create_text_element(slide, elem, left, top, width, height):
     textbox = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
     text_frame = textbox.text_frame
     text_frame.text = elem['text']
-    # Enable word wrap for all text to prevent overflow
     text_frame.word_wrap = True
     
     if len(elem['text'].strip()) <= 3:
@@ -3061,11 +2564,8 @@ def create_text_element(slide, elem, left, top, width, height):
         text_frame.vertical_anchor = MSO_ANCHOR.TOP
     
     alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
-    # Always respect the alignment from the HTML/CSS, don't auto-center based on text length
     text_alignment = alignment_map.get(elem.get('alignment', 'left'), PP_ALIGN.LEFT)
     
-    # Set margins based on alignment - PowerPoint needs small margins for proper text alignment
-    # Use small margin for left/right alignment to ensure text aligns properly
     margin = Inches(0.01) if text_alignment in [PP_ALIGN.LEFT, PP_ALIGN.RIGHT] else Inches(0)
     text_frame.margin_left = margin if text_alignment == PP_ALIGN.LEFT else 0
     text_frame.margin_right = margin if text_alignment == PP_ALIGN.RIGHT else 0
@@ -3092,30 +2592,23 @@ def create_text_element(slide, elem, left, top, width, height):
             if is_italic:
                 run.font.italic = True
             
-            # Convert gradient text to solid fill using one of the gradient colors
             if text_gradient and text_gradient.get('stops'):
-                # Get gradient stops and pick the first stop color as solid fill
                 stops = sorted(text_gradient.get('stops', []), key=lambda s: s.get('position', 0))
                 if stops and stops[0].get('color'):
                     gradient_color = stops[0]['color']
                 else:
-                    # Fallback to element color if gradient stop has no color
                     gradient_color = color
                 
-                # Use the gradient color as solid fill
                 r, g, b = blend_transparent_color(gradient_color, (255, 255, 255))
                 run.font.color.rgb = RGBColor(r, g, b)
             else:
-                # Blend transparent colors with white background
                 r, g, b = blend_transparent_color(color, (255, 255, 255))
                 run.font.color.rgb = RGBColor(r, g, b)
     
     border_color = elem.get('border_color')
     if border_color and elem.get('border_width', 0) > 0:
-        # Blend transparent colors with white background
         r, g, b = blend_transparent_color(border_color, (255, 255, 255))
         textbox.line.color.rgb = RGBColor(r, g, b)
-        # Convert pixels to points for border width
         textbox.line.width = Pt(px_to_pt(elem.get('border_width', 0)))
     else:
         textbox.line.fill.background()
@@ -3131,7 +2624,6 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     
     try:
         pic = None
-        # Handle HTTP/HTTPS URLs
         if img_src.startswith('http'):
             with urllib.request.urlopen(img_src) as response:
                 img_data = response.read()
@@ -3142,14 +2634,12 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                     width=width_emu, height=height_emu
                 )
         elif os.path.exists(img_src):
-            # Local file
             pic = slide.shapes.add_picture(
                 img_src,
                 left_emu, top_emu,
                 width=width_emu, height=height_emu
             )
         
-        # Set link if present
         if pic:
             link_data = elem.get('link', {})
             if link_data.get('href'):
@@ -3159,7 +2649,6 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 except:
                     pass
             
-            # Set opacity if present
             opacity = elem.get('opacity')
             if opacity is not None and opacity < 1:
                 try:
@@ -3167,7 +2656,6 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 except:
                     pass
             
-            # Handle circular images
             media = elem.get('media', {})
             if media.get('is_circle'):
                 try:
@@ -3185,12 +2673,10 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 except:
                     pass
             
-            # Handle object-fit: contain (preserve aspect ratio)
             if media.get('object_fit') == 'contain':
                 natural_width = media.get('image_natural_width_px', 0)
                 natural_height = media.get('image_natural_height_px', 0)
                 if natural_width > 0 and natural_height > 0:
-                    # Convert EMU bounds back to pixels for calculation
                     bounds = elem.get('bounds', {})
                     display_width_px = bounds.get('width', 0)
                     display_height_px = bounds.get('height', 0)
@@ -3200,19 +2686,17 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                         display_aspect = display_width_px / display_height_px
                         
                         if natural_aspect > display_aspect:
-                            # Image is wider - fit to width
                             new_height_px = display_width_px / natural_aspect
                             new_height_emu = px_to_emu_y(new_height_px)
                             pic.height = new_height_emu
                             pic.top = top_emu + (height_emu - new_height_emu) // 2
                         else:
-                            # Image is taller - fit to height
                             new_width_px = display_height_px * natural_aspect
                             new_width_emu = px_to_emu_x(new_width_px)
                             pic.width = new_width_emu
                             pic.left = left_emu + (width_emu - new_width_emu) // 2
     except Exception as e:
-        print(f"  Warning: Could not add image {img_src}: {e}")
+        pass
 
 
 def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
@@ -3221,34 +2705,26 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     if not text_data:
         return
     
-    # Account for padding - adjust position and size
     padding = elem.get('padding', {})
     padding_left_px = padding.get('left', 0)
     padding_top_px = padding.get('top', 0)
     padding_right_px = padding.get('right', 0)
     padding_bottom_px = padding.get('bottom', 0)
     
-    # Adjust text box position to account for padding
-    # The bounds include padding, but text content starts after padding
     adjusted_left_emu = left_emu + px_to_emu_x(padding_left_px)
     adjusted_top_emu = top_emu + px_to_emu_y(padding_top_px)
     adjusted_width_emu = width_emu - px_to_emu_x(padding_left_px + padding_right_px)
     adjusted_height_emu = height_emu - px_to_emu_y(padding_top_px + padding_bottom_px)
     
-    # Ensure non-negative dimensions and minimum size
-    # If padding makes the box too small, use original bounds
     if adjusted_width_emu <= 0 or adjusted_height_emu <= 0:
-        # Padding adjustment resulted in invalid size, use original bounds
         adjusted_left_emu = left_emu
         adjusted_top_emu = top_emu
         adjusted_width_emu = width_emu
         adjusted_height_emu = height_emu
     else:
-        # Ensure minimum size
         adjusted_width_emu = max(adjusted_width_emu, px_to_emu_x(10))
         adjusted_height_emu = max(adjusted_height_emu, px_to_emu_y(10))
     
-    # Ensure position is valid
     if adjusted_left_emu < 0:
         adjusted_left_emu = 0
     if adjusted_top_emu < 0:
@@ -3259,7 +2735,6 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
         adjusted_width_emu, adjusted_height_emu
     )
     
-    # Set fill/background if present (but not if it's a background image - handled separately)
     fill_data = elem.get('fill', {})
     bg_image_url = fill_data.get('background_image_url')
     if not bg_image_url:
@@ -3270,24 +2745,19 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 textbox.fill.solid()
                 textbox.fill.fore_color.rgb = RGBColor(rgb[0], rgb[1], rgb[2])
         else:
-            # No background color - explicitly set to no fill (transparent)
-            # This ensures text is visible even without a background
             try:
                 textbox.fill.background()
             except:
                 pass
     
-    # Set opacity if present
     opacity = elem.get('opacity')
     if opacity is not None and opacity < 1:
         try:
-            # Only set transparency if we have a fill
             if fill_data.get('background_color_rgba'):
                 textbox.fill.transparency = 1 - opacity
         except:
             pass
     
-    # Set link if present
     link_data = elem.get('link', {})
     if link_data.get('href'):
         try:
@@ -3299,31 +2769,23 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     text_frame = textbox.text_frame
     text_content = text_data.get('content', '').strip()
     if not text_content:
-        # No text content - but if this is part of a shape+text combo (border/background image),
-        # the shape was already created, so we can skip the empty text box
         return
     text_frame.text = text_content
     text_frame.word_wrap = True
     
-    # Remove margins for accurate positioning
     text_frame.margin_left = 0
     text_frame.margin_right = 0
     text_frame.margin_top = 0
     text_frame.margin_bottom = 0
     
-    # If this text box is on top of a shape (border/background image), make it transparent
-    # so the shape shows through
     if elem.get('border') or elem.get('fill', {}).get('background_image_url'):
         try:
-            # Ensure text box background is transparent when it's on top of a shape
             textbox.fill.background()
         except:
             pass
     
-    # Format paragraph
     p = text_frame.paragraphs[0]
     
-    # Alignment
     align_map = {
         'left': PP_ALIGN.LEFT,
         'center': PP_ALIGN.CENTER,
@@ -3332,59 +2794,46 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     }
     p.alignment = align_map.get(text_data.get('text_align', 'left').lower(), PP_ALIGN.LEFT)
     
-    # Line spacing (PowerPoint uses spacing in points, relative to font size)
     line_height = text_data.get('line_height', 'normal')
     if line_height and line_height != 'normal':
         try:
             font_size_pt = px_to_pt(text_data.get('font_size_px', 12))
-            # Parse line-height (could be number, px, em, etc.)
             if isinstance(line_height, str):
                 if line_height.endswith('px'):
                     line_height_val = float(line_height.replace('px', ''))
-                    # Convert px to pt and calculate spacing
                     line_height_pt = px_to_pt(line_height_val)
-                    # PowerPoint line_spacing is spacing in points
                     p.line_spacing = line_height_pt - font_size_pt
                 elif line_height.endswith('em'):
-                    # em is relative to font size
                     em_multiplier = float(line_height.replace('em', ''))
                     line_height_pt = font_size_pt * em_multiplier
                     p.line_spacing = line_height_pt - font_size_pt
                 elif line_height.replace('.', '').replace('-', '').isdigit():
-                    # Unitless number (multiplier of font size)
                     multiplier = float(line_height)
                     line_height_pt = font_size_pt * multiplier
                     p.line_spacing = line_height_pt - font_size_pt
             elif isinstance(line_height, (int, float)):
-                # Assume it's a multiplier
                 line_height_pt = font_size_pt * line_height
                 p.line_spacing = line_height_pt - font_size_pt
         except Exception as e:
-            # Silently fail - use default spacing
             pass
     
-    # Format text run
     if p.runs:
         run = p.runs[0]
     else:
         run = p.add_run()
     
-    # Font properties
     font_family = text_data.get('font_family', 'Calibri')
     run.font.name = font_family
     run.font.size = Pt(px_to_pt(text_data.get('font_size_px', 12)))
     
-    # Font weight
     font_weight = text_data.get('font_weight', 'normal')
     if font_weight in ['bold', '700', '800', '900'] or \
        (isinstance(font_weight, str) and font_weight.isdigit() and int(font_weight) >= 700):
         run.font.bold = True
     
-    # Font style
     if text_data.get('font_style') == 'italic':
         run.font.italic = True
     
-    # Text decoration (underline, strikethrough)
     text_decoration = text_data.get('text_decoration', '') or text_data.get('text_decoration_line', '')
     if text_decoration:
         if 'underline' in text_decoration.lower():
@@ -3392,7 +2841,6 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
         if 'line-through' in text_decoration.lower() or 'strikethrough' in text_decoration.lower():
             run.font.strike = True
     
-    # Color
     color_rgba = text_data.get('color_rgba', 'rgba(0,0,0,1)')
     rgb = rgba_to_rgb(color_rgba)
     if rgb:
@@ -3401,80 +2849,64 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
 
 def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     """Create a shape (rectangle) from element with fill/border."""
-    # Determine shape type based on border radius and aspect ratio
     border = elem.get('border', {})
     bounds = elem.get('bounds', {})
     width_px = bounds.get('width', 0)
     height_px = bounds.get('height', 0)
     
-    # Get all border radius values
     radius_tl = border.get('radius_top_left_px', 0)
     radius_tr = border.get('radius_top_right_px', 0)
     radius_br = border.get('radius_bottom_right_px', 0)
     radius_bl = border.get('radius_bottom_left_px', 0)
     
-    # Use the maximum radius for shape type determination
     max_radius = max(radius_tl, radius_tr, radius_br, radius_bl)
     
-    # Check if it's a perfect circle (square aspect ratio + border-radius: 50%)
     is_circle = False
     if width_px > 0 and height_px > 0:
         aspect_ratio = width_px / height_px
         is_squareish = aspect_ratio > 0.9 and aspect_ratio < 1.1
         min_dimension = min(width_px, height_px)
-        # Check if border-radius is approximately 50% (circle)
-        # Use average of all corners or max radius
         avg_radius = (radius_tl + radius_tr + radius_br + radius_bl) / 4
         is_circle = is_squareish and avg_radius >= (min_dimension / 2) * 0.8
     
-    # Determine if rounded (any corner has significant rounding)
-    # Use percentage-based threshold: if radius is > 5% of smallest dimension
     is_rounded = False
     if width_px > 0 and height_px > 0:
         min_dimension = min(width_px, height_px)
-        # Consider rounded if any corner has radius > 2% of smallest dimension
         is_rounded = max_radius > (min_dimension * 0.02) or max_radius > 5
     
     if is_circle:
-        # Perfect circle
         shape = slide.shapes.add_shape(
             MSO_SHAPE.OVAL,
             left_emu, top_emu,
             width_emu, height_emu
         )
     elif is_rounded:
-        # Rounded rectangle
         shape = slide.shapes.add_shape(
             MSO_SHAPE.ROUNDED_RECTANGLE,
             left_emu, top_emu,
             width_emu, height_emu
         )
     else:
-        # Regular rectangle
         shape = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE,
             left_emu, top_emu,
             width_emu, height_emu
         )
     
-    # Set fill
     fill_data = elem.get('fill', {})
     bg_image_url = fill_data.get('background_image_url')
     
     if bg_image_url:
-        # Background image
         try:
             if bg_image_url.startswith('http'):
                 with urllib.request.urlopen(bg_image_url) as response:
                     img_data = response.read()
                     img_stream = io.BytesIO(img_data)
-                    # Create picture shape instead
                     pic = slide.shapes.add_picture(
                         img_stream,
                         left_emu, top_emu,
                         width=width_emu, height=height_emu
                     )
-                    # Set link if present
                     link_data = elem.get('link', {})
                     if link_data.get('href'):
                         try:
@@ -3498,9 +2930,8 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                         pass
                 return
         except Exception as e:
-            print(f"  Warning: Could not add background image {bg_image_url}: {e}")
+            pass
     
-    # Solid color fill
     bg_color_rgba = fill_data.get('background_color_rgba')
     if bg_color_rgba:
         rgb = rgba_to_rgb(bg_color_rgba)
@@ -3510,7 +2941,6 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     else:
         shape.fill.background()
     
-    # Set opacity if present
     opacity = elem.get('opacity')
     if opacity is not None and opacity < 1:
         try:
@@ -3518,9 +2948,7 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
         except:
             pass
     
-    # Set border (all sides - PowerPoint uses uniform border, so use the most prominent)
     if border:
-        # Find the most prominent border
         borders = ['top', 'right', 'bottom', 'left']
         max_border = None
         max_width = 0
@@ -3542,7 +2970,6 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                     shape.line.color.rgb = RGBColor(rgb[0], rgb[1], rgb[2])
                     shape.line.width = Pt(px_to_pt(max_width))
                     
-                    # Set dash style
                     if 'dashed' in border_style.lower():
                         try:
                             shape.line.dash_style = MSO_LINE_DASH_STYLE.DASH
@@ -3558,13 +2985,10 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     else:
         shape.line.fill.background()
     
-    # Set shadow if present
     shadow_data = elem.get('shadow', {})
     if shadow_data.get('box_shadow'):
         try:
-            # Parse box-shadow: offset-x offset-y blur-radius spread-radius color
             shadow_str = shadow_data['box_shadow']
-            # Simple shadow implementation - PowerPoint has limited shadow support
             shape.shadow.inherit = False
             shape.shadow.style = 'outer'
         except:
@@ -3572,7 +2996,6 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     else:
         shape.shadow.inherit = False
     
-    # Set link if present
     link_data = elem.get('link', {})
     if link_data.get('href'):
         try:
@@ -3582,57 +3005,53 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             pass
 
 
-async def convert_json_to_pptx(json_path: str, output_path: str):
+async def convert_json_to_pptx(json_source):
     """
-    Step 1: Read slide data from JSON file.
-    Then process each slide through the conversion pipeline.
+    Convert JSON to PPTX with URL support and Base64 output.
+    json_source can be a URL (http://...) or file path.
+    Output is Base64-encoded PPTX to stdout for Relevance upload.
     """
-    # Load JSON
-    with open(json_path, 'r') as f:
-        slides_data = json.load(f)
+    if json_source.startswith(('http://', 'https://')):
+        req = urllib.request.Request(json_source, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            slides_data = json.loads(response.read().decode('utf-8'))
+    else:
+        with open(json_source, 'r') as f:
+            slides_data = json.load(f)
     
-    print(f"Processing {len(slides_data)} slides...")
-    
-    # Create presentation with custom slide size
     prs = Presentation()
     prs.slide_width = Inches(SLIDE_WIDTH_INCHES)
     prs.slide_height = Inches(SLIDE_HEIGHT_INCHES)
     
-    # Process each slide
     for idx, slide_obj in enumerate(slides_data, 1):
         slide_id = slide_obj.get('id', f'slide_{idx}')
         html_content = slide_obj['html']
         
-        print(f"  [{idx}/{len(slides_data)}] {slide_id}")
+        # Unescape newlines if they're escaped in the JSON
+        html_content = html_content.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
         
-        # Step 2: Extract elements from HTML
         elements_json = await extract_elements_from_html(html_content)
         
-        # Step 4: Convert to PPTX
         create_pptx_from_elements(prs, elements_json)
     
-    # Save presentation
-    prs.save(output_path)
-    print(f"\n✓ Created: {output_path}")
+    pptx_buffer = io.BytesIO()
+    prs.save(pptx_buffer)
+    pptx_buffer.seek(0)
+    
+    b64_data = base64.b64encode(pptx_buffer.read()).decode('utf-8')
+    print(b64_data)
 
 
 async def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 html_to_pptx.py <json_file> [output.pptx]")
         sys.exit(1)
     
-    json_file = sys.argv[1]
-    
-    # Default output: same name as input but with .pptx extension
-    if len(sys.argv) > 2:
-        output_file = sys.argv[2]
-    else:
-        output_file = str(Path(json_file).with_suffix('.pptx'))
+    json_source = sys.argv[1]
     
     try:
-        await convert_json_to_pptx(json_file, output_file)
+        await convert_json_to_pptx(json_source)
     except Exception as e:
-        print(f"Error: {e}")
+        sys.stderr.write(f"Error: {e}\n")
         import traceback
         traceback.print_exc()
         sys.exit(1)
@@ -3640,4 +3059,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
