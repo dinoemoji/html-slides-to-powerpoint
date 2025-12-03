@@ -178,6 +178,25 @@ async def extract_elements_from_html(html_content: str):
             except:
                 # Fallback if networkidle times out or is not available
                 pass
+            
+            # Wait for Tailwind CSS to load and apply styles
+            # Check if tailwindcss script is present and wait for it
+            await page.evaluate("""
+                async () => {
+                    // Wait for Tailwind CSS to be fully loaded and applied
+                    if (document.querySelector('script[src*="tailwindcss"]')) {
+                        // Wait for tailwind to be defined
+                        let attempts = 0;
+                        while (!window.tailwind && attempts < 50) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            attempts++;
+                        }
+                        // Extra wait for styles to be applied
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                }
+            """)
+            
             # Wait for all images to load
             await page.evaluate("""
                 async () => {
@@ -192,7 +211,7 @@ async def extract_elements_from_html(html_content: str):
                     }));
                 }
             """)
-            await page.wait_for_timeout(2000)  # Wait for animations to finish
+            await page.wait_for_timeout(1000)  # Extra wait for styles to be fully computed
             
             # Extract elements using JavaScript - sequential type-based approach
             elements = await page.evaluate("""
@@ -259,11 +278,14 @@ async def extract_elements_from_html(html_content: str):
                     
                     // Normalize CSS text-align values to PowerPoint-compatible values
                     const normalizeTextAlign = (align, direction = 'ltr') => {
-                        if (!align) return 'left'; // Default to left
-                        const normalized = align.toLowerCase().trim();
-                        if (normalized === 'start') {
-                            return direction === 'rtl' ? 'right' : 'left';
+                        // Handle undefined, null, or empty values - check parent or default
+                        if (!align || align === '' || align === 'start') {
+                            // For start, or if undefined, default to left for LTR
+                            if (align === 'start' || !align) {
+                                return direction === 'rtl' ? 'right' : 'left';
+                            }
                         }
+                        const normalized = align.toLowerCase().trim();
                         if (normalized === 'end') {
                             return direction === 'rtl' ? 'left' : 'right';
                         }
@@ -1095,9 +1117,26 @@ async def extract_elements_from_html(html_content: str):
                         const styles = window.getComputedStyle(img);
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
                         
-                        let borderRadius = parseFloat(styles.borderRadius);
+                        // Get border radius from image first
+                        let borderRadius = parseFloat(styles.borderRadius) || 0;
                         let isCircle = false;
                         let containerRect = rect;
+                        
+                        // If image has no border radius, check parent container
+                        // Parent containers often have border-radius and overflow:hidden to clip images
+                        if (borderRadius === 0 || isNaN(borderRadius)) {
+                            const parent = img.parentElement;
+                            if (parent) {
+                                const parentStyles = window.getComputedStyle(parent);
+                                const parentBorderRadius = parseFloat(parentStyles.borderRadius) || 0;
+                                const parentOverflow = parentStyles.overflow;
+                                
+                                // If parent has border-radius and overflow:hidden, inherit it
+                                if (parentBorderRadius > 0 && (parentOverflow === 'hidden' || parentOverflow === 'clip')) {
+                                    borderRadius = parentBorderRadius;
+                                }
+                            }
+                        }
                         
                         const parent = img.parentElement;
                         if (parent) {
@@ -1131,6 +1170,33 @@ async def extract_elements_from_html(html_content: str):
                             // The Python code will handle loading errors
                         }
                         
+                        // Detect image alignment from CSS
+                        let imageAlign = 'left';  // Default
+                        const marginLeft = styles.marginLeft;
+                        const marginRight = styles.marginRight;
+                        const display = styles.display;
+                        const float = styles.float || styles.cssFloat;
+                        
+                        // Check for centered image (margin: auto or parent text-align: center)
+                        if (display === 'block' && marginLeft === 'auto' && marginRight === 'auto') {
+                            imageAlign = 'center';
+                        } else if (parent) {
+                            const parentStyles = window.getComputedStyle(parent);
+                            const parentAlign = parentStyles.textAlign;
+                            if (parentAlign === 'center') {
+                                imageAlign = 'center';
+                            } else if (parentAlign === 'right') {
+                                imageAlign = 'right';
+                            }
+                        }
+                        
+                        // Check float property
+                        if (float === 'right') {
+                            imageAlign = 'right';
+                        } else if (float === 'left') {
+                            imageAlign = 'left';
+                        }
+                        
                         elements.push({
                             type: 'image',
                             src: img.src,
@@ -1140,7 +1206,8 @@ async def extract_elements_from_html(html_content: str):
                             natural_height: img.naturalHeight || rect.height,
                             border_radius: borderRadius,
                             object_fit: styles.objectFit || 'fill',
-                            is_circle: isCircle
+                            is_circle: isCircle,
+                            alignment: imageAlign
                         });
                     });
                     
@@ -1709,9 +1776,13 @@ def create_pptx_from_elements(prs, elements_json):
                         with open(bg_image_url, 'rb') as f:
                             img_data = f.read()
                     
-                    # Convert to PNG if needed
+                    original_size = len(img_data)
+                    
+                    # Compress and optimize the image (maintain_dimensions=True to keep original aspect ratio)
                     img_stream = io.BytesIO(img_data)
-                    img_stream = convert_image_to_png(img_stream)
+                    img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
+                    
+                    compressed_size = img_stream.getbuffer().nbytes
                     
                     # Add background image as a full-slide picture
                     left = Inches(0)
@@ -1720,7 +1791,10 @@ def create_pptx_from_elements(prs, elements_json):
                     height = Inches(SLIDE_HEIGHT_INCHES)
                     
                     pic = slide.shapes.add_picture(img_stream, left, top, width, height)
-                    print(f"  ✓ Added background image ({len(img_data)} bytes)")
+                    if compressed_size < original_size:
+                        print(f"  ✓ Added background image ({original_size} bytes → {compressed_size} bytes, {100 - int(compressed_size * 100 / original_size)}% reduction)")
+                    else:
+                        print(f"  ✓ Added background image ({original_size} bytes)")
                     
                     # Send background image to back so all other elements appear on top
                     slide.shapes._spTree.remove(pic._element)
@@ -2361,14 +2435,49 @@ def create_shape_element(slide, elem, left, top, width, height):
     borders = elem.get('borders') or {}
     has_individual_borders = borders and any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
     
-    if has_individual_borders:
+    # Check if all 4 sides have borders (full outline)
+    has_all_four_borders = (has_individual_borders and 
+                           borders.get('top') and borders.get('top').get('width', 0) > 0 and
+                           borders.get('right') and borders.get('right').get('width', 0) > 0 and
+                           borders.get('bottom') and borders.get('bottom').get('width', 0) > 0 and
+                           borders.get('left') and borders.get('left').get('width', 0) > 0)
+    
+    # If all 4 sides have borders with border-radius, use uniform border for proper rounding
+    if has_all_four_borders and border_radius > 0:
+        # Check if all borders are the same (uniform)
+        border_widths = [borders.get(side, {}).get('width', 0) for side in ['top', 'right', 'bottom', 'left']]
+        border_colors = [borders.get(side, {}).get('color') for side in ['top', 'right', 'bottom', 'left']]
+        all_same_width = len(set(border_widths)) == 1
+        all_same_color = len(set(str(c) for c in border_colors)) == 1
+        
+        if all_same_width and all_same_color:
+            # Uniform border with border-radius - use native border for perfect rounding
+            border = borders['top']  # All sides are the same
+            r, g, b = blend_transparent_color(border['color'], (255, 255, 255))
+            shape.line.color.rgb = RGBColor(r, g, b)
+            shape.line.width = Pt(px_to_pt(border['width']))
+        else:
+            # Non-uniform full borders - individual borders won't work well with rounding
+            # Use the most prominent border as uniform
+            max_border = None
+            max_width = 0
+            for side in ['top', 'right', 'bottom', 'left']:
+                if borders.get(side):
+                    width_val = borders[side].get('width', 0)
+                    if width_val > max_width:
+                        max_width = width_val
+                        max_border = borders[side]
+            if max_border:
+                r, g, b = blend_transparent_color(max_border['color'], (255, 255, 255))
+                shape.line.color.rgb = RGBColor(r, g, b)
+                shape.line.width = Pt(px_to_pt(max_width))
+    elif has_individual_borders:
         # Remove border from shape first to avoid grey border
         shape.line.fill.background()
         
         # Determine if we need rounded corners for border rectangles
-        use_rounded_borders = border_radius > 0
+        use_rounded_borders = border_radius > 0  # Apply rounding for any border-radius value
         min_dimension = min(coords.get('width', 0), coords.get('height', 0))
-        is_rounded = border_radius > 0
         
         # Apply borders to individual sides using thin rectangle shapes
         # Top border
@@ -2378,17 +2487,15 @@ def create_shape_element(slide, elem, left, top, width, height):
                 border_width_pt = px_to_pt(border['width'])
                 # Create a thin rectangle for the top border
                 line_height = border_width_pt / 72.0  # Convert points to inches
-                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
+                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if use_rounded_borders else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
                     Inches(left), Inches(top),
                     Inches(width), Inches(line_height)
                 )
-                if use_rounded_borders and is_rounded:
+                if use_rounded_borders and min_dimension > 0:
                     try:
-                        # Only round the bottom corners (top corners are at the edge)
-                        # Set adjustment to match the main shape's radius
-                        adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
+                        adjustment = min((border_radius / min_dimension) * 2, 1.0)
                         line.adjustments[0] = adjustment
                     except:
                         pass
@@ -2404,16 +2511,15 @@ def create_shape_element(slide, elem, left, top, width, height):
                 border_width_pt = px_to_pt(border['width'])
                 # Create a thin rectangle for the right border
                 line_width = border_width_pt / 72.0  # Convert points to inches
-                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
+                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if use_rounded_borders else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
                     Inches(left + width - line_width), Inches(top),
                     Inches(line_width), Inches(height)
                 )
-                if use_rounded_borders and is_rounded:
+                if use_rounded_borders and min_dimension > 0:
                     try:
-                        # Only round the left corners (right corners are at the edge)
-                        adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
+                        adjustment = min((border_radius / min_dimension) * 2, 1.0)
                         line.adjustments[0] = adjustment
                     except:
                         pass
@@ -2429,16 +2535,15 @@ def create_shape_element(slide, elem, left, top, width, height):
                 border_width_pt = px_to_pt(border['width'])
                 # Create a thin rectangle for the bottom border
                 line_height = border_width_pt / 72.0  # Convert points to inches
-                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
+                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if use_rounded_borders else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
                     Inches(left), Inches(top + height - line_height),
                     Inches(width), Inches(line_height)
                 )
-                if use_rounded_borders and is_rounded:
+                if use_rounded_borders and min_dimension > 0:
                     try:
-                        # Only round the top corners (bottom corners are at the edge)
-                        adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
+                        adjustment = min((border_radius / min_dimension) * 2, 1.0)
                         line.adjustments[0] = adjustment
                     except:
                         pass
@@ -2454,16 +2559,15 @@ def create_shape_element(slide, elem, left, top, width, height):
                 border_width_pt = px_to_pt(border['width'])
                 # Create a thin rectangle for the left border
                 line_width = border_width_pt / 72.0  # Convert points to inches
-                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if (use_rounded_borders and is_rounded) else MSO_SHAPE.RECTANGLE
+                border_shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if use_rounded_borders else MSO_SHAPE.RECTANGLE
                 line = slide.shapes.add_shape(
                     border_shape_type,
                     Inches(left), Inches(top),
                     Inches(line_width), Inches(height)
                 )
-                if use_rounded_borders and is_rounded:
+                if use_rounded_borders and min_dimension > 0:
                     try:
-                        # Only round the right corners (left corners are at the edge)
-                        adjustment = min((border_radius / min_dimension) * 2, 1.0) if min_dimension > 0 else 0.1
+                        adjustment = min((border_radius / min_dimension) * 2, 1.0)
                         line.adjustments[0] = adjustment
                     except:
                         pass
@@ -2786,15 +2890,24 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     color = elem['color']
     
     for paragraph in text_frame.paragraphs:
-        # Use the alignment from the element, defaulting to center for small badges/pills
+        # Use the alignment from the element
+        # Default to center for styled_text elements (badges, pills, buttons with backgrounds)
         alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
-        stored_alignment = elem.get('alignment', 'center')
-        # For small badges/pills, always center; otherwise use stored alignment
+        stored_alignment = elem.get('alignment', 'center')  # Default to center for styled text elements
+        
+        # For very small badges/pills or pill-shaped elements (rounded-full), always center
         text_content = elem.get('text', '').strip()
         is_small_badge = len(text_content) <= 3 and coords.get('width', 0) <= 60 and coords.get('height', 0) <= 60
-        if is_small_badge:
+        
+        # Check if this is a pill/capsule shape (border-radius >= 50% of height)
+        elem_height = coords.get('height', 0)
+        is_pill_shape = border_radius > 0 and elem_height > 0 and border_radius >= (elem_height / 2) * 0.9
+        
+        if is_small_badge or is_pill_shape:
+            # Small badges and pill-shaped elements should always be centered
             paragraph.alignment = PP_ALIGN.CENTER
         else:
+            # Use the alignment from CSS (already extracted and stored)
             paragraph.alignment = alignment_map.get(stored_alignment.lower() if isinstance(stored_alignment, str) else 'center', PP_ALIGN.CENTER)
         for run in paragraph.runs:
             run.font.size = Pt(elem['font']['size'])
@@ -2966,6 +3079,95 @@ def create_table_element(slide, elem):
                     run.font.color.rgb = RGBColor(r, g, b)
 
 
+def compress_image(img_stream, max_width=1920, max_height=1080, quality=85, maintain_dimensions=False):
+    """
+    Compress and optimize an image.
+    - Resizes if dimensions exceed max_width or max_height (maintaining aspect ratio)
+    - Converts to JPEG with quality setting for better compression
+    - Falls back to PNG for images with transparency
+    - Handles all formats including WEBP
+    
+    Args:
+        maintain_dimensions: If True, don't resize - only convert format and optimize
+    
+    Returns a new BytesIO stream with compressed image data.
+    """
+    try:
+        img_stream.seek(0)
+        img = Image.open(img_stream)
+        
+        # Force load the image data to handle lazy-loading formats like WEBP
+        img.load()
+        
+        original_format = img.format  # Store original format for debugging
+        original_size = img_stream.getbuffer().nbytes
+        
+        # Check if image has transparency
+        has_transparency = img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info)
+        
+        # Resize if image is too large (only if maintain_dimensions is False)
+        if not maintain_dimensions and (img.width > max_width or img.height > max_height):
+            # Calculate scaling factor maintaining aspect ratio
+            scale = min(max_width / img.width, max_height / img.height)
+            new_width = int(img.width * scale)
+            new_height = int(img.height * scale)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Create output stream
+        output_stream = io.BytesIO()
+        
+        # Save with appropriate format
+        if has_transparency:
+            # Keep transparency, use PNG with optimization
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            elif img.mode not in ('RGBA', 'LA'):
+                # Ensure we have a proper alpha channel
+                if 'A' not in img.mode:
+                    img = img.convert('RGBA')
+            img.save(output_stream, format='PNG', optimize=True)
+            output_format = 'PNG'
+        else:
+            # No transparency, use JPEG for better compression
+            if img.mode in ('RGBA', 'LA', 'P'):
+                # Convert to RGB (removing alpha channel)
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                if img.mode == 'RGBA':
+                    rgb_img.paste(img, mask=img.split()[-1])
+                else:
+                    rgb_img.paste(img)
+                img = rgb_img
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            img.save(output_stream, format='JPEG', quality=quality, optimize=True)
+            output_format = 'JPEG'
+        
+        output_stream.seek(0)
+        compressed_size = output_stream.getbuffer().nbytes
+        
+        # For unsupported formats like WEBP, always convert regardless of size
+        if original_format in ('WEBP', 'AVIF'):
+            return output_stream
+        
+        # For supported formats, only use compressed version if it's actually smaller
+        if compressed_size < original_size:
+            return output_stream
+        else:
+            img_stream.seek(0)
+            return img_stream
+            
+    except Exception as e:
+        # If compression fails, return original stream
+        print(f"  Warning: Image compression failed: {e}")
+        import traceback
+        traceback.print_exc()
+        img_stream.seek(0)
+        return img_stream
+
+
 def convert_image_to_png(img_stream):
     """
     Convert any image format (including WEBP) to PNG.
@@ -3003,10 +3205,20 @@ def create_image_element(slide, elem, left, top, width, height):
             print(f"  Warning: Image element has no src attribute")
             return
         
-        # Ensure width and height are valid
+        # Ensure width and height are valid - use natural dimensions as fallback
         if width <= 0 or height <= 0:
-            print(f"  Warning: Image has invalid dimensions: {width}x{height}")
-            return
+            natural_width = elem.get('natural_width', 0)
+            natural_height = elem.get('natural_height', 0)
+            if natural_width > 0 and natural_height > 0:
+                # Use natural dimensions converted to inches
+                width = pixels_to_inches(natural_width)
+                height = pixels_to_inches(natural_height)
+                print(f"  Info: Using natural dimensions for image: {width:.2f}x{height:.2f}")
+            else:
+                # Use minimum default size to avoid skipping
+                width = max(width, 0.5)
+                height = max(height, 0.5)
+                print(f"  Warning: Image has invalid dimensions, using default: {width:.2f}x{height:.2f}")
         
         # Debug: print image info (only for first few to avoid spam)
         # print(f"  Adding image: {img_src[:80]}... at ({left:.2f}, {top:.2f}), size ({width:.2f}, {height:.2f})")
@@ -3015,25 +3227,25 @@ def create_image_element(slide, elem, left, top, width, height):
         natural_height = elem.get('natural_height')
         object_fit = elem.get('object_fit', 'fill')
         
-        if natural_width and natural_height and natural_width > 0 and natural_height > 0:
+        # Only adjust dimensions for 'contain' object-fit to maintain aspect ratio within container
+        # For all other cases, use the display dimensions as specified (PowerPoint will scale the image)
+        if object_fit == 'contain' and natural_width and natural_height and natural_width > 0 and natural_height > 0:
             natural_aspect = natural_width / natural_height
             display_aspect = width / height if height > 0 else 1
-            if object_fit == 'contain':
-                if natural_aspect > display_aspect:
-                    h_new = width / natural_aspect
-                    top += (height - h_new) / 2
-                    height = h_new
-                else:
-                    w_new = height * natural_aspect
-                    left += (width - w_new) / 2
-                    width = w_new
-            elif abs(natural_aspect - display_aspect) > 0.1:
-                if natural_aspect > display_aspect:
-                    height = width / natural_aspect
-                else:
-                    width = height * natural_aspect
+            # Center the image within the container while maintaining aspect ratio
+            if natural_aspect > display_aspect:
+                # Image is wider - fit to width, adjust height
+                h_new = width / natural_aspect
+                top += (height - h_new) / 2
+                height = h_new
+            else:
+                # Image is taller - fit to height, adjust width
+                w_new = height * natural_aspect
+                left += (width - w_new) / 2
+                width = w_new
         
         is_circle = elem.get('is_circle', False)
+        border = elem.get('border')
         pic = None
         if img_src.startswith('data:image'):
             # Handle data URI (base64 encoded images)
@@ -3041,11 +3253,16 @@ def create_image_element(slide, elem, left, top, width, height):
                 # Extract base64 data from data URI: data:image/png;base64,<data>
                 header, encoded = img_src.split(',', 1)
                 img_data = base64.b64decode(encoded)
+                original_size = len(img_data)
                 img_stream = io.BytesIO(img_data)
-                # Convert to PNG if needed (handles WEBP and other formats)
-                img_stream = convert_image_to_png(img_stream)
+                # Compress and optimize the image (maintain_dimensions=True to keep original size)
+                img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
+                compressed_size = img_stream.getbuffer().nbytes
                 pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                print(f"    ✓ Added data URI image ({len(img_data)} bytes)")
+                if compressed_size < original_size:
+                    print(f"    ✓ Added data URI image ({original_size} bytes → {compressed_size} bytes)")
+                else:
+                    print(f"    ✓ Added data URI image ({original_size} bytes)")
             except Exception as e:
                 print(f"  Warning: Could not decode data URI image: {e}")
                 import traceback
@@ -3059,11 +3276,16 @@ def create_image_element(slide, elem, left, top, width, height):
                         print(f"  Warning: Image data is empty for {img_src[:60]}...")
                         pic = None
                     else:
+                        original_size = len(img_data)
                         img_stream = io.BytesIO(img_data)
-                        # Convert to PNG if needed (handles WEBP and other formats)
-                        img_stream = convert_image_to_png(img_stream)
+                        # Compress and optimize the image (maintain_dimensions=True to keep original size)
+                        img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
+                        compressed_size = img_stream.getbuffer().nbytes
                         pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                        print(f"    ✓ Added HTTP image ({len(img_data)} bytes)")
+                        if compressed_size < original_size:
+                            print(f"    ✓ Added HTTP image ({original_size} bytes → {compressed_size} bytes)")
+                        else:
+                            print(f"    ✓ Added HTTP image ({original_size} bytes)")
             except Exception as e:
                 print(f"  Warning: Could not load image from {img_src[:80]}...: {e}")
                 import traceback
@@ -3074,11 +3296,16 @@ def create_image_element(slide, elem, left, top, width, height):
                 # Read local file into BytesIO for conversion
                 with open(img_src, 'rb') as f:
                     img_data = f.read()
+                    original_size = len(img_data)
                     img_stream = io.BytesIO(img_data)
-                    # Convert to PNG if needed (handles WEBP and other formats)
-                    img_stream = convert_image_to_png(img_stream)
+                    # Compress and optimize the image (maintain_dimensions=True to keep original size)
+                    img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
+                    compressed_size = img_stream.getbuffer().nbytes
                     pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-                    print(f"    ✓ Added local image")
+                    if compressed_size < original_size:
+                        print(f"    ✓ Added local image ({original_size} bytes → {compressed_size} bytes)")
+                    else:
+                        print(f"    ✓ Added local image ({original_size} bytes)")
             except Exception as e:
                 print(f"  Warning: Could not load local image {img_src}: {e}")
                 import traceback
@@ -3086,6 +3313,134 @@ def create_image_element(slide, elem, left, top, width, height):
                 pic = None
         else:
             print(f"  Warning: Image source not recognized: {img_src[:80]}...")
+        
+        # Apply border-radius to image if present
+        if pic:
+            try:
+                border_radius_px = elem.get('border_radius', 0)
+                # Ensure border_radius is a valid number
+                try:
+                    border_radius_px = float(border_radius_px) if border_radius_px else 0
+                except (ValueError, TypeError):
+                    border_radius_px = 0
+                    
+                # Also check for is_circle flag - if true, make it fully circular
+                is_circle = elem.get('is_circle', False)
+                
+                if is_circle or border_radius_px > 0:
+                    # Get element coordinates for proper dimension calculation
+                    coords = elem.get('coordinates', {})
+                    elem_width_px = coords.get('width', 0)
+                    elem_height_px = coords.get('height', 0)
+                    
+                    if elem_width_px > 0 and elem_height_px > 0:
+                        min_dimension_px = min(elem_width_px, elem_height_px)
+                        
+                        # For circles, use maximum radius (50% of min dimension)
+                        if is_circle:
+                            border_radius_px = min_dimension_px / 2
+                        
+                        # PowerPoint adjustment: 0-50000 where 50000 = radius is half of min dimension
+                        # adjustment_ratio: 0.0 = no rounding, 1.0 = maximum rounding (radius = min_dim/2)
+                        max_radius_px = min_dimension_px / 2
+                        adjustment_ratio = min(border_radius_px / max_radius_px, 1.0) if max_radius_px > 0 else 0
+                        
+                        # Convert to PowerPoint adjustment value (0-50000)
+                        adjustment_value = int(adjustment_ratio * 50000)
+                        
+                        if adjustment_value > 0:
+                            # Apply rounded rectangle corners to picture using XML
+                            from pptx.oxml import parse_xml
+                            spPr = pic._element.spPr
+                            
+                            # Pictures need the prstGeom to be inserted in the correct position
+                            # Remove any existing geometry elements (custGeom or prstGeom)
+                            for child in list(spPr):
+                                tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                                if tag_name in ('custGeom', 'prstGeom'):
+                                    spPr.remove(child)
+                            
+                            # Create rounded rectangle geometry (or ellipse for perfect circles)
+                            if is_circle and adjustment_ratio >= 0.99:
+                                # Use ellipse for perfect circles
+                                prstGeom = parse_xml('<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="ellipse"><a:avLst/></a:prstGeom>')
+                                geom_type = "ellipse"
+                            else:
+                                # Use rounded rectangle with adjustment
+                                prstGeom = parse_xml(f'<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="roundRect">' +
+                                                    '<a:avLst>' +
+                                                    f'<a:gd name="adj" fmla="val {adjustment_value}"/>' +
+                                                    '</a:avLst>' +
+                                                    '</a:prstGeom>')
+                                geom_type = f"roundRect (adj={adjustment_value})"
+                            
+                            # Insert geometry as first child of spPr (after xfrm if present)
+                            # Find xfrm position
+                            xfrm_index = -1
+                            for i, child in enumerate(spPr):
+                                tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                                if tag_name == 'xfrm':
+                                    xfrm_index = i
+                                    break
+                            
+                            if xfrm_index >= 0:
+                                spPr.insert(xfrm_index + 1, prstGeom)
+                            else:
+                                spPr.insert(0, prstGeom)
+                            
+                            print(f"    ✓ Applied border-radius: {border_radius_px:.1f}px → {geom_type}")
+            except Exception as e:
+                print(f"  Warning: Could not apply border-radius to image: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Apply border to image if present
+        if pic and border:
+            try:
+                # Find the most prominent border (all sides)
+                borders = ['top', 'right', 'bottom', 'left']
+                max_border = None
+                max_width = 0
+                
+                for side in borders:
+                    side_border = border.get(side, {})
+                    border_width = side_border.get('width', 0) or side_border.get('width_px', 0)
+                    if border_width > max_width:
+                        max_width = border_width
+                        max_border = side_border
+                
+                if max_border and max_width > 0:
+                    border_color_rgba = max_border.get('color', '') or max_border.get('color_rgba', '')
+                    border_style = max_border.get('style', 'solid')
+                    
+                    if border_color_rgba:
+                        rgb = rgba_to_rgb(border_color_rgba)
+                        if rgb:
+                            pic.line.color.rgb = RGBColor(rgb[0], rgb[1], rgb[2])
+                            pic.line.width = Pt(px_to_pt(max_width))
+                            
+                            # Set dash style
+                            if 'dashed' in border_style.lower():
+                                try:
+                                    pic.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+                                except:
+                                    pass
+                            elif 'dotted' in border_style.lower():
+                                try:
+                                    pic.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
+                                except:
+                                    pass
+                else:
+                    # No border
+                    pic.line.fill.background()
+            except Exception as e:
+                print(f"  Warning: Could not apply border to image: {e}")
+        elif pic:
+            # No border specified, make line transparent
+            try:
+                pic.line.fill.background()
+            except:
+                pass
         
         # Don't apply circular clipping - it might be hiding the images
         # The gradient circle shape provides the circular background
@@ -3543,6 +3898,35 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                         left_emu, top_emu,
                         width=width_emu, height=height_emu
                     )
+                    
+                    # Apply border-radius to picture if present
+                    border_radius_px = elem.get('border_radius', 0)
+                    if border_radius_px and border_radius_px > 0:
+                        try:
+                            # Calculate adjustment value for rounded corners
+                            # PowerPoint uses 0.0-1.0 scale where 0.5 is fully rounded
+                            min_dimension = min(width_emu, height_emu)
+                            max_radius_emu = min_dimension / 2
+                            border_radius_emu = px_to_emu_x(border_radius_px)
+                            adjustment = min(border_radius_emu / max_radius_emu, 0.5)
+                            
+                            # Apply rounded rectangle corners to picture
+                            from pptx.oxml import parse_xml
+                            spPr = pic._element.spPr
+                            # Create rounded rectangle geometry
+                            prstGeom = parse_xml(f'<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="roundRect">' +
+                                                '<a:avLst>' +
+                                                f'<a:gd name="adj" fmla="val {int(adjustment * 100000)}"/>' +
+                                                '</a:avLst>' +
+                                                '</a:prstGeom>')
+                            # Replace existing geometry
+                            for child in list(spPr):
+                                if 'Geom' in child.tag:
+                                    spPr.remove(child)
+                            spPr.insert(0, prstGeom)
+                        except Exception as e:
+                            print(f"  Warning: Could not apply border-radius to background image: {e}")
+                    
                     # Set link if present
                     link_data = elem.get('link', {})
                     if link_data.get('href'):
@@ -3558,6 +3942,34 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                     left_emu, top_emu,
                     width=width_emu, height=height_emu
                 )
+                
+                # Apply border-radius to picture if present
+                border_radius_px = elem.get('border_radius', 0)
+                if border_radius_px and border_radius_px > 0:
+                    try:
+                        # Calculate adjustment value for rounded corners
+                        min_dimension = min(width_emu, height_emu)
+                        max_radius_emu = min_dimension / 2
+                        border_radius_emu = px_to_emu_x(border_radius_px)
+                        adjustment = min(border_radius_emu / max_radius_emu, 0.5)
+                        
+                        # Apply rounded rectangle corners to picture
+                        from pptx.oxml import parse_xml
+                        spPr = pic._element.spPr
+                        # Create rounded rectangle geometry
+                        prstGeom = parse_xml(f'<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="roundRect">' +
+                                            '<a:avLst>' +
+                                            f'<a:gd name="adj" fmla="val {int(adjustment * 100000)}"/>' +
+                                            '</a:avLst>' +
+                                            '</a:prstGeom>')
+                        # Replace existing geometry
+                        for child in list(spPr):
+                            if 'Geom' in child.tag:
+                                spPr.remove(child)
+                        spPr.insert(0, prstGeom)
+                    except Exception as e:
+                        print(f"  Warning: Could not apply border-radius to background image: {e}")
+                
                 link_data = elem.get('link', {})
                 if link_data.get('href'):
                     try:
