@@ -515,18 +515,27 @@ async def extract_elements_from_html(html_content: str):
                         const bodyRect = body.getBoundingClientRect();
                         let bgColor = parseColor(window.getComputedStyle(body).backgroundColor);
                         let bgGradient = null;
+                        let bgImageUrl = null;
                         
-                        // Check body for gradients
+                        // Check body for gradients and background images
                         const bodyStyles = window.getComputedStyle(body);
-                        if (bodyStyles.backgroundImage && bodyStyles.backgroundImage !== 'none' && bodyStyles.backgroundImage.includes('gradient')) {
-                            bgGradient = parseGradient(bodyStyles.backgroundImage, bgColor);
+                        if (bodyStyles.backgroundImage && bodyStyles.backgroundImage !== 'none') {
+                            if (bodyStyles.backgroundImage.includes('gradient')) {
+                                bgGradient = parseGradient(bodyStyles.backgroundImage, bgColor);
+                            } else {
+                                // Extract background image URL
+                                const urlMatch = bodyStyles.backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/);
+                                if (urlMatch && urlMatch[1]) {
+                                    bgImageUrl = urlMatch[1];
+                                }
+                            }
                         }
                         if (!bgGradient && bodyStyles.background && bodyStyles.background.includes('gradient')) {
                             bgGradient = parseGradient(bodyStyles.background, bgColor);
                         }
                         
-                        // Always check child elements that cover the screen for gradients and background color
-                        // Child gradients often represent the actual visual background
+                        // Always check child elements that cover the screen for gradients, background images, and background color
+                        // Child gradients/images often represent the actual visual background
                         const children = Array.from(body.children);
                         for (const child of children) {
                             const childRect = child.getBoundingClientRect();
@@ -540,14 +549,22 @@ async def extract_elements_from_html(html_content: str):
                                     bgColor = childBgColor; // Use child background color as base
                                 }
                                 
-                                // Check for gradients in backgroundImage (includes ::before pseudo-element gradients)
+                                // Check for gradients and background images in backgroundImage
                                 // Use child bgColor for blending transparent colors in gradients
                                 const blendColor = (childBgColor && childBgColor.a > 0) ? childBgColor : bgColor;
-                                if (childStyles.backgroundImage && childStyles.backgroundImage !== 'none' && childStyles.backgroundImage.includes('gradient')) {
-                                    const parsed = parseGradient(childStyles.backgroundImage, blendColor);
-                                    if (parsed) {
-                                        bgGradient = parsed;
-                                        break; // Found gradient, use it
+                                if (childStyles.backgroundImage && childStyles.backgroundImage !== 'none') {
+                                    if (childStyles.backgroundImage.includes('gradient')) {
+                                        const parsed = parseGradient(childStyles.backgroundImage, blendColor);
+                                        if (parsed) {
+                                            bgGradient = parsed;
+                                            break; // Found gradient, use it
+                                        }
+                                    } else {
+                                        // Check for background image URL
+                                        const urlMatch = childStyles.backgroundImage.match(/url\\(["']?([^"')]+)["']?\\)/);
+                                        if (urlMatch && urlMatch[1]) {
+                                            bgImageUrl = urlMatch[1];
+                                        }
                                     }
                                 }
                                 if (childStyles.background && childStyles.background.includes('gradient')) {
@@ -559,7 +576,7 @@ async def extract_elements_from_html(html_content: str):
                                 }
                                 
                                 // Also check background-image property (Tailwind might use this)
-                                if (childStyles.backgroundImage && childStyles.backgroundImage !== 'none') {
+                                if (!bgGradient && !bgImageUrl && childStyles.backgroundImage && childStyles.backgroundImage !== 'none') {
                                     // Try to parse even if it doesn't explicitly say "gradient" (Tailwind uses CSS variables)
                                     const bgImg = childStyles.backgroundImage;
                                     if (bgImg.includes('linear-gradient') || bgImg.includes('radial-gradient') || bgImg.includes('var(--tw-gradient')) {
@@ -611,20 +628,24 @@ async def extract_elements_from_html(html_content: str):
                             }
                         }
                         
-                        // Always add background element if we have color or gradient
+                        // Always add background element if we have color, gradient, or image
                         // Prefer the actual background color over gradient stop colors
                         if (bgColor && bgColor.a >= 0) {
-                            elements.push({
+                            const bgElem = {
                                 type: 'background',
                                 color: bgColor,
                                 gradient: bgGradient,
                                 coordinates: { x: 0, y: 0, width: bodyRect.width, height: bodyRect.height }
-                            });
-                        } else if (bgGradient) {
-                            // Even if no solid color, add background with gradient
+                            };
+                            if (bgImageUrl) {
+                                bgElem.image_url = bgImageUrl;
+                            }
+                            elements.push(bgElem);
+                        } else if (bgGradient || bgImageUrl) {
+                            // Even if no solid color, add background with gradient or image
                             // Use darkest stop color or first stop if available
                             let fallbackColor = null;
-                            if (bgGradient.stops && bgGradient.stops.length > 0) {
+                            if (bgGradient && bgGradient.stops && bgGradient.stops.length > 0) {
                                 // Find darkest stop
                                 let darkestStop = null;
                                 let darkestBrightness = 255;
@@ -648,12 +669,16 @@ async def extract_elements_from_html(html_content: str):
                             if (!fallbackColor) {
                                 fallbackColor = { r: 255, g: 255, b: 255, a: 1 };
                             }
-                            elements.push({
+                            const bgElem = {
                                 type: 'background',
                                 color: fallbackColor,
                                 gradient: bgGradient,
                                 coordinates: { x: 0, y: 0, width: bodyRect.width, height: bodyRect.height }
-                            });
+                            };
+                            if (bgImageUrl) {
+                                bgElem.image_url = bgImageUrl;
+                            }
+                            elements.push(bgElem);
                         }
                     }
                     
@@ -1662,9 +1687,50 @@ def create_pptx_from_elements(prs, elements_json):
         try:
             bg_gradient = background_elem.get('gradient')
             bg_color = background_elem.get('color')
+            bg_image_url = background_elem.get('image_url')
+            
+            # If there's a background image, add it as a full-slide picture
+            if bg_image_url:
+                try:
+                    # Download the image
+                    if bg_image_url.startswith(('http://', 'https://')):
+                        req = urllib.request.Request(bg_image_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=10) as response:
+                            img_data = response.read()
+                    elif bg_image_url.startswith('data:'):
+                        # Handle data URLs
+                        match = re.match(r'data:image/[^;]+;base64,(.+)', bg_image_url)
+                        if match:
+                            img_data = base64.b64decode(match.group(1))
+                        else:
+                            raise ValueError("Unsupported data URL format")
+                    else:
+                        # Assume it's a local file path
+                        with open(bg_image_url, 'rb') as f:
+                            img_data = f.read()
+                    
+                    # Convert to PNG if needed
+                    img_stream = io.BytesIO(img_data)
+                    img_stream = convert_image_to_png(img_stream)
+                    
+                    # Add background image as a full-slide picture
+                    left = Inches(0)
+                    top = Inches(0)
+                    width = Inches(SLIDE_WIDTH_INCHES)
+                    height = Inches(SLIDE_HEIGHT_INCHES)
+                    
+                    pic = slide.shapes.add_picture(img_stream, left, top, width, height)
+                    print(f"  ✓ Added background image ({len(img_data)} bytes)")
+                    
+                    # Send background image to back so all other elements appear on top
+                    slide.shapes._spTree.remove(pic._element)
+                    slide.shapes._spTree.insert(2, pic._element)
+                except Exception as e:
+                    print(f"  Warning: Could not add background image {bg_image_url}: {e}")
             
             # If there's a gradient, create a full-slide shape with gradient
             # (PowerPoint slide backgrounds don't support gradients directly)
+            # This will be layered on top of the background image if both exist
             if bg_gradient:
                 coords = background_elem.get('coordinates', {})
                 bg_shape = slide.shapes.add_shape(
@@ -1686,9 +1752,12 @@ def create_pptx_from_elements(prs, elements_json):
                     print(f"  Warning: Gradient application failed and no fallback color available")
                 
                 # Send background shape to back so all other elements appear on top
+                # Insert after background image if present
                 slide.shapes._spTree.remove(bg_shape._element)
-                slide.shapes._spTree.insert(2, bg_shape._element)
-            elif bg_color:
+                insert_pos = 3 if bg_image_url else 2
+                slide.shapes._spTree.insert(insert_pos, bg_shape._element)
+            elif bg_color and not bg_image_url:
+                # Only apply solid color if no image (image takes precedence)
                 slide.background.fill.solid()
                 # Blend transparent colors with white background
                 r, g, b = blend_transparent_color(bg_color, (255, 255, 255))
