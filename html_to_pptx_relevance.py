@@ -107,6 +107,97 @@ def blend_transparent_color(color_dict, bg_color=(255, 255, 255)):
     return (r_blended, g_blended, b_blended)
 
 
+async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_px, browser_context=None):
+    """
+    Download Font Awesome icon as PNG using Playwright to render SVG.
+    Returns: BytesIO object or None if failed
+    """
+    import io
+    import urllib.request
+    import urllib.error
+    import ssl
+    
+    # Map Font Awesome style names to Iconify collection names
+    style_map = {
+        'solid': 'fa-solid',
+        'regular': 'fa-regular',
+        'brands': 'fa-brands',
+        'light': 'fa-solid',  # Fallback to solid for light
+    }
+    
+    # Font Awesome 5 to 6 icon name mappings (for renamed icons)
+    icon_name_map = {
+        'coffee': 'mug-hot',
+        'glass': 'martini-glass-empty',
+        'tachometer': 'gauge',
+        'tachometer-alt': 'gauge-high',
+        # Add more mappings as needed
+    }
+    
+    collection = style_map.get(icon_style, 'fa-solid')
+    final_icon_name = icon_name_map.get(icon_name, icon_name)
+    
+    # Convert RGB to hex
+    hex_color = f"{color_rgb['r']:02x}{color_rgb['g']:02x}{color_rgb['b']:02x}"
+    
+    # Use browser_context (Playwright page) to render SVG
+    if browser_context:
+        try:
+            # First, try to download SVG from Iconify API
+            svg_url = f"https://api.iconify.design/{collection}/{final_icon_name}.svg?color=%23{hex_color}&height={size_px}"
+            
+            try:
+                ssl_context = ssl._create_unverified_context()
+                with urllib.request.urlopen(svg_url, context=ssl_context, timeout=10) as response:
+                    svg_content = response.read().decode('utf-8')
+                    
+                    # Create a temporary HTML page to render the SVG
+                    svg_html = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <style>
+                            body {{ margin: 0; padding: 0; background: transparent; }}
+                            .icon-container {{
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                width: {size_px}px;
+                                height: {size_px}px;
+                            }}
+                            svg {{
+                                width: 100%;
+                                height: 100%;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="icon-container">
+                            {svg_content}
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    
+                    await browser_context.set_content(svg_html)
+                    await browser_context.wait_for_load_state('networkidle')
+                    icon_element = await browser_context.query_selector('.icon-container')
+                    if icon_element:
+                        png_bytes = await icon_element.screenshot(type='png', omit_background=True)
+                        return io.BytesIO(png_bytes)
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    print(f"    ⚠ Icon not found: {collection}/{final_icon_name}", file=sys.stderr)
+                else:
+                    print(f"    ⚠ HTTP error downloading icon: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"    ⚠ Failed to render icon {collection}/{final_icon_name}: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"    ⚠ Failed to process icon {collection}/{final_icon_name}: {e}", file=sys.stderr)
+    
+    return None
+
+
 async def extract_elements_from_html(html_content: str):
     """
     Step 2: Render slide in Playwright and extract element data.
@@ -1208,84 +1299,39 @@ async def extract_elements_from_html(html_content: str):
                         });
                     });
                     
-                    // Font Awesome icons - convert to emoji fallback since PowerPoint doesn't support Font Awesome fonts
-                    const faToEmoji = {
-                        'fa-plug': '🔌',
-                        'fa-bolt': '⚡',
-                        'fa-database': '💾',
-                        'fa-shield-alt': '🛡️',
-                        'fa-shield': '🛡️',
-                        'fa-check': '✓',
-                        'fa-check-circle': '✓',
-                        'fa-times': '✗',
-                        'fa-arrow-right': '→',
-                        'fa-arrow-left': '←',
-                        'fa-arrow-up': '↑',
-                        'fa-arrow-down': '↓',
-                        'fa-star': '⭐',
-                        'fa-heart': '❤️',
-                        'fa-user': '👤',
-                        'fa-users': '👥',
-                        'fa-home': '🏠',
-                        'fa-envelope': '✉️',
-                        'fa-phone': '📞',
-                        'fa-calendar': '📅',
-                        'fa-clock': '🕐',
-                        'fa-search': '🔍',
-                        'fa-settings': '⚙️',
-                        'fa-cog': '⚙️',
-                        'fa-gear': '⚙️'
-                    };
-                    
+                    // Font Awesome icons - extract as icon elements for PNG rendering
                     document.querySelectorAll('i[class*="fa-"]').forEach(icon => {
                         const rect = icon.getBoundingClientRect();
                         if (rect.width === 0 || rect.height === 0) return;
                         const styles = window.getComputedStyle(icon);
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
                         
-                        // Find matching emoji from class names
-                        let emoji = null;
+                        // Extract icon name and style
+                        let iconName = '';
+                        let iconStyle = 'solid'; // Default to solid
                         const classList = icon.className.split(' ');
+                        
                         for (const className of classList) {
-                            if (faToEmoji[className]) {
-                                emoji = faToEmoji[className];
-                                break;
+                            if (className === 'fa-solid' || className === 'fas') iconStyle = 'solid';
+                            else if (className === 'fa-regular' || className === 'far') iconStyle = 'regular';
+                            else if (className === 'fa-brands' || className === 'fab') iconStyle = 'brands';
+                            else if (className === 'fa-light' || className === 'fal') iconStyle = 'light';
+                            else if (className.startsWith('fa-') && className !== 'fa-solid' && className !== 'fa-regular' && className !== 'fa-brands' && className !== 'fa-light') {
+                                iconName = className.replace('fa-', '');
                             }
                         }
                         
-                        // If no emoji found, try to match partial class name
-                        if (!emoji) {
-                            for (const className of classList) {
-                                if (className.startsWith('fa-')) {
-                                    const baseName = className.replace('fa-', '');
-                                    // Try common variations
-                                    if (faToEmoji['fa-' + baseName]) {
-                                        emoji = faToEmoji['fa-' + baseName];
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // If emoji found, create text element with emoji
-                        if (emoji) {
-                            const iconColor = parseColor(styles.color) || { r: 107, g: 92, b: 255, a: 1 };
+                        if (iconName) {
+                            const iconColor = parseColor(styles.color) || { r: 0, g: 0, b: 0, a: 1 };
                             const fontSize = parseFloat(styles.fontSize);
                             
                             elements.push({
-                                type: 'text',
-                                text: emoji,
+                                type: 'icon',
+                                icon_name: iconName,
+                                icon_style: iconStyle,
                                 coordinates: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-                                font: {
-                                    size: Math.round(fontSize * 0.75),
-                                    family: 'Arial',
-                                    weight: styles.fontWeight,
-                                    style: styles.fontStyle
-                                },
                                 color: iconColor,
-                                alignment: 'center',
-                                border_color: null,
-                                border_width: 0
+                                size: Math.round(fontSize * 4) // Use 4x size for high-quality PNG (will be scaled down in PPTX)
                             });
                         }
                     });
@@ -1297,10 +1343,13 @@ async def extract_elements_from_html(html_content: str):
                     semanticElements.forEach(el => {
                         if (processedTextElements.has(el) || processedTableElements.has(el)) return;
                         
-                        // Check if this element contains any styled_text children (badges)
+                        // Check if this element contains any styled_text children (badges) or icons
                         const styledTextChildren = Array.from(el.querySelectorAll('*')).filter(child => {
                             return styledTextElements.has(child);
                         });
+                        
+                        // Check if this element contains Font Awesome icons
+                        const iconChildren = Array.from(el.querySelectorAll('i[class*="fa-"]'));
                         
                         const styles = window.getComputedStyle(el);
                         const rect = el.getBoundingClientRect();
@@ -1337,14 +1386,14 @@ async def extract_elements_from_html(html_content: str):
                             }
                         }
                         
-                        // If element contains inline badges, extract text segments around them
-                        if (styledTextChildren.length > 0) {
+                        // If element contains inline badges or icons, extract text segments around them
+                        if (styledTextChildren.length > 0 || iconChildren.length > 0) {
                             const hasInlineBadges = styledTextChildren.some(badge => {
                                 const badgeRect = badge.getBoundingClientRect();
                                 return badgeRect.width <= 60 && badgeRect.height <= 60;
                             });
                             
-                            if (hasInlineBadges) {
+                            if (hasInlineBadges || iconChildren.length > 0) {
                                 // Extract text segments by walking child nodes
                                 // This creates separate text elements for segments before/after badges
                                 const extractTextSegments = (parentEl) => {
@@ -1369,8 +1418,9 @@ async def extract_elements_from_html(html_content: str):
                                                 }
                                             }
                                         } else if (node.nodeType === Node.ELEMENT_NODE) {
-                                            // If this is a badge, skip (already extracted as styled_text)
-                                            if (!styledTextElements.has(node)) {
+                                            // If this is a badge or icon, skip (already extracted separately)
+                                            const isIcon = node.tagName === 'I' && node.className && node.className.includes('fa-');
+                                            if (!styledTextElements.has(node) && !isIcon) {
                                                 // Recursively extract from child element
                                                 const childSegments = extractTextSegments(node);
                                                 segments.push(...childSegments);
@@ -1797,7 +1847,33 @@ async def extract_elements_from_html(html_content: str):
                         })
                     except Exception as e:
                         # Skip this canvas if screenshot fails
-                        print(f"    ⚠ Failed to screenshot canvas {canvas['index']}: {e}")
+                        print(f"    ⚠ Failed to screenshot canvas {canvas['index']}: {e}", file=sys.stderr)
+                        pass
+            
+            # Download and render Font Awesome icons as PNG
+            icon_elements = [e for e in elements if e.get('type') == 'icon']
+            if icon_elements:
+                for i, icon_elem in enumerate(icon_elements, 1):
+                    try:
+                        icon_name = icon_elem.get('icon_name')
+                        icon_style = icon_elem.get('icon_style', 'solid')
+                        color = icon_elem.get('color', {'r': 0, 'g': 0, 'b': 0, 'a': 1})
+                        size = int(icon_elem.get('size', 24))
+                        
+                        # Download and render icon using browser
+                        icon_png = await download_fontawesome_icon_png(
+                            icon_name, icon_style, color, size, page  # Pass Playwright page as browser_context
+                        )
+                        
+                        if icon_png:
+                            # Convert PNG bytes to base64 data URL
+                            icon_png.seek(0)
+                            icon_base64 = base64.b64encode(icon_png.read()).decode('utf-8')
+                            icon_elem['png_data'] = f"data:image/png;base64,{icon_base64}"
+                        
+                    except Exception as e:
+                        print(f"    ⚠ Icon download/render failed for {icon_name}: {e}", file=sys.stderr)
+                        # Icon download failed, will skip icon
                         pass
             
         finally:
@@ -1902,7 +1978,7 @@ def create_pptx_from_elements(prs, elements_json):
             traceback.print_exc()
             pass
     
-    type_order = {'shape': 1, 'table': 2, 'text': 3, 'styled_text': 4, 'image': 5}
+    type_order = {'shape': 1, 'table': 2, 'text': 3, 'styled_text': 4, 'image': 5, 'icon': 5}
     
     text_elements_by_position = {}
     sorted_elements = sorted(
@@ -1930,6 +2006,41 @@ def create_pptx_from_elements(prs, elements_json):
             create_table_element(slide, elem)
         elif elem_type == 'image':
             create_image_element(slide, elem, left, top, width, height)
+        elif elem_type == 'icon':
+            # Render Font Awesome icon as PNG image
+            png_data_url = elem.get('png_data')
+            if png_data_url and png_data_url.startswith('data:image/png;base64,'):
+                try:
+                    header, encoded = png_data_url.split(',', 1)
+                    img_data = base64.b64decode(encoded)
+                    img_stream = io.BytesIO(img_data)
+                    
+                    # Get original image dimensions to preserve aspect ratio
+                    img = Image.open(img_stream)
+                    original_width_px, original_height_px = img.size
+                    img_stream.seek(0)  # Reset stream for pptx.add_picture
+                    
+                    # Calculate constrained dimensions
+                    aspect_ratio = original_width_px / original_height_px
+                    if width / height > aspect_ratio:  # Bounding box is wider than image
+                        new_width = height * aspect_ratio
+                        new_height = height
+                    else:  # Bounding box is taller than image
+                        new_height = width / aspect_ratio
+                        new_width = width
+                    
+                    pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top),
+                                                  width=Inches(new_width), height=Inches(new_height))
+                    
+                    # Disable shadow on icon images
+                    pic.shadow.inherit = False
+                    
+                    # Remove border from icon images
+                    pic.line.fill.background()
+                except Exception as e:
+                    print(f"    ⚠ Failed to insert icon image: {e}", file=sys.stderr)
+            else:
+                print(f"    ⚠ No PNG data for icon {elem.get('icon_name')}, skipping.", file=sys.stderr)
         elif elem_type == 'text':
             create_text_element(slide, elem, left, top, width, height)
             text_elements_by_position[(coords['x'], coords['y'])] = elem
