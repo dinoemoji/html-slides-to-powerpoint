@@ -1746,11 +1746,14 @@ async def extract_elements_from_html(html_content: str):
                 }
             """)
             
-            # Capture canvas elements (for Chart.js and other canvas-based visualizations)
-            # Query all canvas elements and their positions
+            # Capture canvas elements (ONLY for Chart.js charts, not all canvases)
+            # Query only canvas elements that have Chart.js instances
             canvas_info = await page.evaluate("""
                 () => {
                     const canvases = [];
+                    // Only process canvases if Chart.js is loaded
+                    if (!window.Chart) return canvases;
+                    
                     document.querySelectorAll('canvas').forEach((canvas, index) => {
                         const rect = canvas.getBoundingClientRect();
                         const styles = window.getComputedStyle(canvas);
@@ -1758,6 +1761,14 @@ async def extract_elements_from_html(html_content: str):
                         // Skip hidden canvases
                         if (rect.width === 0 || rect.height === 0) return;
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
+                        
+                        // IMPORTANT: Only screenshot canvases that have Chart.js instances
+                        // Skip regular drawing canvases, Paint apps, etc.
+                        const hasChart = Object.values(window.Chart.instances || {}).some(
+                            chart => chart.canvas === canvas
+                        );
+                        
+                        if (!hasChart) return;
                         
                         canvases.push({
                             index: index,
@@ -2785,17 +2796,17 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
     # Check if all borders are identical - if so, use uniform border with dash style support
     all_borders_same = False
     if has_individual_borders:
-        top = borders.get('top')
-        right = borders.get('right')
-        bottom = borders.get('bottom')
-        left = borders.get('left')
+        border_top = borders.get('top')
+        border_right = borders.get('right')
+        border_bottom = borders.get('bottom')
+        border_left = borders.get('left')
         
         # All four borders must exist and be identical in width and color
-        if all([top, right, bottom, left]):
-            all_same_width = (top.get('width') == right.get('width') == 
-                            bottom.get('width') == left.get('width'))
-            all_same_color = (top.get('color') == right.get('color') == 
-                            bottom.get('color') == left.get('color'))
+        if all([border_top, border_right, border_bottom, border_left]):
+            all_same_width = (border_top.get('width') == border_right.get('width') == 
+                            border_bottom.get('width') == border_left.get('width'))
+            all_same_color = (border_top.get('color') == border_right.get('color') == 
+                            border_bottom.get('color') == border_left.get('color'))
             all_borders_same = all_same_width and all_same_color
     
     # If borders are not all the same, use individual border rendering
@@ -3532,17 +3543,17 @@ def create_image_element(slide, elem, left, top, width, height):
         #             spPr.remove(child)
         #     spPr.insert(0, prstGeom)
         
-        # CRITICAL: Move image to absolute end of shapes collection to ensure it's on top
-        # PowerPoint renders shapes in order, so last shape appears on top
-        if pic:
-            try:
-                # Remove from current position and re-add at end to ensure it's on top
-                slide.shapes._spTree.remove(pic._element)
-                slide.shapes._spTree.append(pic._element)
-                print(f"    ✓ Moved image to top (z-order)")
-            except Exception as e:
-                print(f"  Warning: Could not move image to top: {e}")
-                # Image should still be visible, just might be covered
+        # Note: Images are now placed in the correct z-order from extraction
+        # No need to force them to top - respect the natural layering from the browser
+        # if pic:
+        #     try:
+        #         # Remove from current position and re-add at end to ensure it's on top
+        #         slide.shapes._spTree.remove(pic._element)
+        #         slide.shapes._spTree.append(pic._element)
+        #         print(f"    ✓ Moved image to top (z-order)")
+        #     except Exception as e:
+        #         print(f"  Warning: Could not move image to top: {e}")
+        #         # Image should still be visible, just might be covered
     except Exception as e:
         print(f"  Error creating image element: {e}")
         import traceback
