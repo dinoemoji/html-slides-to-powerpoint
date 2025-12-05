@@ -213,6 +213,22 @@ async def extract_elements_from_html(html_content: str):
             """)
             await page.wait_for_timeout(1000)  # Extra wait for styles to be fully computed
             
+            # Wait for Chart.js to render if present
+            await page.evaluate("""
+                async () => {
+                    // Check if Chart.js is loaded
+                    if (window.Chart) {
+                        // Wait for all canvas elements with charts to be rendered
+                        const canvases = Array.from(document.querySelectorAll('canvas'));
+                        if (canvases.length > 0) {
+                            // Extra wait for charts to fully render
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                    }
+                }
+            """)
+            await page.wait_for_timeout(500)  # Extra buffer for chart animations
+            
             # Extract elements using JavaScript - sequential type-based approach
             elements = await page.evaluate("""
                 () => {
@@ -1729,6 +1745,68 @@ async def extract_elements_from_html(html_content: str):
                     return elements;
                 }
             """)
+            
+            # Capture canvas elements (for Chart.js and other canvas-based visualizations)
+            # Query all canvas elements and their positions
+            canvas_info = await page.evaluate("""
+                () => {
+                    const canvases = [];
+                    document.querySelectorAll('canvas').forEach((canvas, index) => {
+                        const rect = canvas.getBoundingClientRect();
+                        const styles = window.getComputedStyle(canvas);
+                        
+                        // Skip hidden canvases
+                        if (rect.width === 0 || rect.height === 0) return;
+                        if (styles.display === 'none' || styles.visibility === 'hidden') return;
+                        
+                        canvases.push({
+                            index: index,
+                            x: rect.left,
+                            y: rect.top,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                    });
+                    return canvases;
+                }
+            """)
+            
+            # Screenshot each canvas and add to elements
+            if canvas_info and len(canvas_info) > 0:
+                for canvas in canvas_info:
+                    try:
+                        # Get the canvas element by index
+                        canvas_element = page.locator(f'canvas').nth(canvas['index'])
+                        
+                        # Take screenshot of the canvas element
+                        screenshot_bytes = await canvas_element.screenshot()
+                        
+                        # Convert to base64 data URL
+                        screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+                        data_url = f"data:image/png;base64,{screenshot_base64}"
+                        
+                        # Add as an image element
+                        elements.append({
+                            'type': 'image',
+                            'src': data_url,
+                            'alt': 'Chart',
+                            'coordinates': {
+                                'x': canvas['x'],
+                                'y': canvas['y'],
+                                'width': canvas['width'],
+                                'height': canvas['height']
+                            },
+                            'natural_width': canvas['width'],
+                            'natural_height': canvas['height'],
+                            'border_radius': 0,
+                            'object_fit': 'fill',
+                            'is_circle': False,
+                            'alignment': 'left'
+                        })
+                    except Exception as e:
+                        # Skip this canvas if screenshot fails
+                        print(f"    ⚠ Failed to screenshot canvas {canvas['index']}: {e}")
+                        pass
             
         finally:
             await browser.close()
