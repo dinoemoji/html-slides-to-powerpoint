@@ -36,21 +36,17 @@ EMU_PER_PX_Y = (SLIDE_HEIGHT_INCHES * INCH_TO_EMU) / SLIDE_HEIGHT_PX
 
 PX_TO_PT_FACTOR = 0.75
 
-
 def px_to_emu_x(px: float) -> int:
     """Convert pixels to EMU for X coordinate."""
     return int(px * EMU_PER_PX_X)
-
 
 def px_to_emu_y(px: float) -> int:
     """Convert pixels to EMU for Y coordinate."""
     return int(px * EMU_PER_PX_Y)
 
-
 def px_to_pt(px: float) -> float:
     """Convert CSS pixels to PowerPoint points."""
     return px * PX_TO_PT_FACTOR
-
 
 def pixels_to_inches(pixels, dpi=100):
     """Convert pixels to inches.
@@ -58,28 +54,26 @@ def pixels_to_inches(pixels, dpi=100):
     """
     return pixels / dpi
 
-
 def rgba_to_rgb(rgba_str: str):
     """Convert rgba string to RGB tuple, handling alpha blending with white background."""
     if not rgba_str or rgba_str == 'transparent':
         return None
-    
+
     match = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)', rgba_str)
     if not match:
         return None
-    
+
     r = int(match.group(1))
     g = int(match.group(2))
     b = int(match.group(3))
     alpha = float(match.group(4)) if match.group(4) else 1.0
-    
+
     if alpha < 1:
         r = int(alpha * r + (1 - alpha) * 255)
         g = int(alpha * g + (1 - alpha) * 255)
         b = int(alpha * b + (1 - alpha) * 255)
-    
-    return (r, g, b)
 
+    return (r, g, b)
 
 def blend_transparent_color(color_dict, bg_color=(255, 255, 255)):
     """
@@ -90,22 +84,21 @@ def blend_transparent_color(color_dict, bg_color=(255, 255, 255)):
     """
     if not color_dict:
         return bg_color
-    
+
     alpha = color_dict.get('a', 1.0)
     if alpha >= 1.0:
         return (color_dict['r'], color_dict['g'], color_dict['b'])
-    
+
     r = color_dict['r']
     g = color_dict['g']
     b = color_dict['b']
     bg_r, bg_g, bg_b = bg_color
-    
+
     r_blended = int(alpha * r + (1 - alpha) * bg_r)
     g_blended = int(alpha * g + (1 - alpha) * bg_g)
     b_blended = int(alpha * b + (1 - alpha) * bg_b)
-    
-    return (r_blended, g_blended, b_blended)
 
+    return (r_blended, g_blended, b_blended)
 
 async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_px, browser_context=None):
     """
@@ -116,7 +109,7 @@ async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_p
     import urllib.request
     import urllib.error
     import ssl
-    
+
     # Map Font Awesome style names to Iconify collection names
     style_map = {
         'solid': 'fa-solid',
@@ -124,7 +117,7 @@ async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_p
         'brands': 'fa-brands',
         'light': 'fa-solid',  # Fallback to solid for light
     }
-    
+
     # Font Awesome 5 to 6 icon name mappings (for renamed icons)
     icon_name_map = {
         'coffee': 'mug-hot',
@@ -133,42 +126,38 @@ async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_p
         'tachometer-alt': 'gauge-high',
         # Add more mappings as needed
     }
-    
+
     collection = style_map.get(icon_style, 'fa-solid')
     final_icon_name = icon_name_map.get(icon_name, icon_name)
-    
+
     # Convert RGB to hex
     hex_color = f"{color_rgb['r']:02x}{color_rgb['g']:02x}{color_rgb['b']:02x}"
-    
+
     # Use browser_context (Playwright page) to render SVG
     if browser_context:
         try:
             # First, try to download SVG from Iconify API
             svg_url = f"https://api.iconify.design/{collection}/{final_icon_name}.svg?color=%23{hex_color}&height={size_px}"
-            
+
             try:
                 ssl_context = ssl._create_unverified_context()
                 with urllib.request.urlopen(svg_url, context=ssl_context, timeout=10) as response:
                     svg_content = response.read().decode('utf-8')
-                    
+
                     # Create a temporary HTML page to render the SVG
                     svg_html = f"""
                     <!DOCTYPE html>
                     <html>
                     <head>
                         <style>
-                            body {{ margin: 0; padding: 0; background: transparent; }}
-                            .icon-container {{
-                                display: flex;
+                            body margin: 0; padding: 0; background: transparent;
+                            .icon-container display: flex;
                                 align-items: center;
                                 justify-content: center;
                                 width: {size_px}px;
                                 height: {size_px}px;
-                            }}
-                            svg {{
-                                width: 100%;
+                            svg width: 100%;
                                 height: 100%;
-                            }}
                         </style>
                     </head>
                     <body>
@@ -178,7 +167,7 @@ async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_p
                     </body>
                     </html>
                     """
-                    
+
                     await browser_context.set_content(svg_html)
                     await browser_context.wait_for_load_state('networkidle')
                     icon_element = await browser_context.query_selector('.icon-container')
@@ -186,17 +175,13 @@ async def download_fontawesome_icon_png(icon_name, icon_style, color_rgb, size_p
                         png_bytes = await icon_element.screenshot(type='png', omit_background=True)
                         return io.BytesIO(png_bytes)
             except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    print(f"    ⚠ Icon not found: {collection}/{final_icon_name}", file=sys.stderr)
-                else:
-                    print(f"    ⚠ HTTP error downloading icon: {e}", file=sys.stderr)
+                pass
             except Exception as e:
-                print(f"    ⚠ Failed to render icon {collection}/{final_icon_name}: {e}", file=sys.stderr)
+                pass
         except Exception as e:
-            print(f"    ⚠ Failed to process icon {collection}/{final_icon_name}: {e}", file=sys.stderr)
-    
-    return None
+            pass
 
+    return None
 
 async def extract_elements_from_html(html_content: str):
     """
@@ -240,7 +225,7 @@ async def extract_elements_from_html(html_content: str):
             html_with_disabled_animations = html_content.replace("<body>", f"<body>{style_tag}")
         else:
             html_with_disabled_animations = style_tag + html_content
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(viewport={
@@ -248,14 +233,14 @@ async def extract_elements_from_html(html_content: str):
             'height': SLIDE_HEIGHT_PX,
             'deviceScaleFactor': 1
         })
-        
+
         try:
             await page.set_content(html_with_disabled_animations)
             try:
                 await page.wait_for_load_state('networkidle', timeout=10000)
             except:
                 pass
-            
+
             # Wait for Tailwind CSS to load and apply styles
             # Check if tailwindcss script is present and wait for it
             await page.evaluate("""
@@ -273,7 +258,7 @@ async def extract_elements_from_html(html_content: str):
                     }
                 }
             """)
-            
+
             await page.evaluate("""
                 async () => {
                     const images = Array.from(document.querySelectorAll('img'));
@@ -288,7 +273,7 @@ async def extract_elements_from_html(html_content: str):
                 }
             """)
             await page.wait_for_timeout(1000)
-            
+
             # Wait for Chart.js to render if present
             await page.evaluate("""
                 async () => {
@@ -304,14 +289,14 @@ async def extract_elements_from_html(html_content: str):
                 }
             """)
             await page.wait_for_timeout(500)  # Extra buffer for chart animations
-            
+
             elements = await page.evaluate("""
                 () => {
                     const elements = [];
-                    
+
                     const parseColor = (colorStr, bgColor = null) => {
                         if (!colorStr) return null;
-                        
+
                         // Handle transparent - return null if no background to blend with
                         if (colorStr === 'transparent' || colorStr === 'rgba(0, 0, 0, 0)') {
                             if (bgColor) {
@@ -320,7 +305,7 @@ async def extract_elements_from_html(html_content: str):
                             // Return transparent (alpha 0) - don't default to any color
                             return { r: 0, g: 0, b: 0, a: 0 };
                         }
-                        
+
                         if (colorStr.includes('gradient')) {
                             const subMatch = colorStr.match(/rgba?\\([\\d\\s,.]+\\)/);
                             if (subMatch) {
@@ -330,7 +315,7 @@ async def extract_elements_from_html(html_content: str):
                                 if (hexMatch) colorStr = hexMatch[0];
                             }
                         }
-                        
+
                         // Match both rgb() and rgba() formats
                         const rgbMatch = colorStr.match(/rgb(?:a)?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)(?:\\s*,\\s*([\\d.]+))?\\s*\\)/);
                         if (rgbMatch) {
@@ -338,7 +323,7 @@ async def extract_elements_from_html(html_content: str):
                             const g = parseInt(rgbMatch[2]);
                             const b = parseInt(rgbMatch[3]);
                             const alpha = rgbMatch[4] ? parseFloat(rgbMatch[4]) : 1;
-                            
+
                             // Blend with background if alpha < 1 and background provided
                             if (alpha < 1 && bgColor) {
                                 return {
@@ -353,7 +338,7 @@ async def extract_elements_from_html(html_content: str):
                             }
                             return { r: r, g: g, b: b, a: 1.0 };
                         }
-                        
+
                         const hexMatch = colorStr.match(/#([0-9a-fA-F]{6})/);
                         if (hexMatch) {
                             const hex = hexMatch[1];
@@ -366,7 +351,7 @@ async def extract_elements_from_html(html_content: str):
                         }
                         return null;
                     };
-                    
+
                     // Normalize CSS text-align values to PowerPoint-compatible values
                     const normalizeTextAlign = (align, direction = 'ltr') => {
                         if (!align) return 'left'; // Default to left
@@ -380,10 +365,10 @@ async def extract_elements_from_html(html_content: str):
                         // Return as-is if already a standard value (left, center, right, justify)
                         return normalized;
                     };
-                    
+
                     const parseGradient = (gradientStr, bgColor = null) => {
                         if (!gradientStr || !gradientStr.includes('gradient')) return null;
-                        
+
                         // Handle multiple gradients (comma-separated) - don't skip any, but prioritize the best one
                         // Split by comma but be careful of commas inside rgba() or function calls
                         const gradients = [];
@@ -401,14 +386,14 @@ async def extract_elements_from_html(html_content: str):
                             current += char;
                         }
                         if (current.trim()) gradients.push(current.trim());
-                        
+
                         // Parse all gradients and pick the best one (don't skip any)
                         let bestGradient = null;
                         let bestScore = -1;
-                        
+
                         for (const gradStr of gradients) {
                             if (!gradStr.includes('gradient')) continue;
-                            
+
                             // Try to parse this gradient (include all, even with transparent)
                             const parsed = parseSingleGradient(gradStr, bgColor);
                             if (parsed && parsed.stops && parsed.stops.length >= 2) {
@@ -419,7 +404,7 @@ async def extract_elements_from_html(html_content: str):
                                 } else {
                                     score += 50; // Linear gradients are okay too
                                 }
-                                
+
                                 // Calculate average brightness and opacity of stops
                                 let totalBrightness = 0;
                                 let totalOpacity = 0;
@@ -435,7 +420,7 @@ async def extract_elements_from_html(html_content: str):
                                         }
                                     }
                                 }
-                                
+
                                 if (parsed.stops.length > 0) {
                                     const avgBrightness = totalBrightness / parsed.stops.length;
                                     const avgOpacity = totalOpacity / parsed.stops.length;
@@ -444,23 +429,23 @@ async def extract_elements_from_html(html_content: str):
                                     // Higher opacity = higher score
                                     score += avgOpacity * 50;
                                 }
-                                
+
                                 if (score > bestScore) {
                                     bestScore = score;
                                     bestGradient = parsed;
                                 }
                             }
                         }
-                        
+
                         if (bestGradient) return bestGradient;
-                        
+
                         // Fallback: try parsing the whole string as a single gradient
                         return parseSingleGradient(gradientStr, bgColor);
                     };
-                    
+
                     const parseSingleGradient = (gradientStr, bgColor = null) => {
                         if (!gradientStr || !gradientStr.includes('gradient')) return null;
-                        
+
                         // Parse linear-gradient(angle, color1 stop1, color2 stop2, ...)
                         // Use indexOf and substring to avoid regex escaping issues
                         const linearStart = gradientStr.indexOf('linear-gradient(');
@@ -480,9 +465,9 @@ async def extract_elements_from_html(html_content: str):
                                 }
                             }
                             const content = gradientStr.substring(contentStart, contentEnd);
-                            
+
                             const stops = [];
-                            
+
                             // Extract angle (optional, defaults to 180deg/top to bottom)
                             let angle = 90; // Default: top to bottom
                             const angleMatch = content.match(/(\\d+)deg/);
@@ -499,7 +484,7 @@ async def extract_elements_from_html(html_content: str):
                             } else if (content.match(/^\\d+deg/)) {
                                 angle = parseInt(content.match(/^(\\d+)deg/)[1]);
                             }
-                            
+
                             // Extract color stops
                             // Match patterns like: #FF71B8 0%, #6B5CFF 100% or rgba(107, 92, 255, 1) 0% or rgb(147, 51, 234) or transparent
                             // Updated to handle rgb() without alpha and ensure proper matching
@@ -509,7 +494,7 @@ async def extract_elements_from_html(html_content: str):
                                 const colorStr = match[1];
                                 const positionStr = match[2] || (stops.length === 0 ? '0' : '100');
                                 const position = parseFloat(positionStr) / 100;
-                                
+
                                 // Parse color, blending transparent with background
                                 const color = parseColor(colorStr, bgColor);
                                 if (color) {
@@ -519,7 +504,7 @@ async def extract_elements_from_html(html_content: str):
                                     });
                                 }
                             }
-                            
+
                             if (stops.length >= 2) {
                                 return {
                                     type: 'linear',
@@ -528,13 +513,13 @@ async def extract_elements_from_html(html_content: str):
                                 };
                             }
                         }
-                        
+
                         // Fallback to regex for radial gradients
                         const linearMatch = gradientStr.match(/linear-gradient\\(([^)]+)\\)/);
                         if (linearMatch) {
                             const content = linearMatch[1];
                             const stops = [];
-                            
+
                             // Extract angle (optional, defaults to 180deg/top to bottom)
                             let angle = 90; // Default: top to bottom
                             const angleMatch = content.match(/(\\d+)deg/);
@@ -551,7 +536,7 @@ async def extract_elements_from_html(html_content: str):
                             } else if (content.match(/^\\d+deg/)) {
                                 angle = parseInt(content.match(/^(\\d+)deg/)[1]);
                             }
-                            
+
                             // Extract color stops
                             // Match patterns like: #FF71B8 0%, #6B5CFF 100% or rgba(107, 92, 255, 1) 0% or rgb(147, 51, 234) or transparent
                             // Updated to handle rgb() without alpha and ensure proper matching
@@ -561,7 +546,7 @@ async def extract_elements_from_html(html_content: str):
                                 const colorStr = match[1];
                                 const positionStr = match[2] || (stops.length === 0 ? '0' : '100');
                                 const position = parseFloat(positionStr) / 100;
-                                
+
                                 // Parse color, blending transparent with background
                                 const color = parseColor(colorStr, bgColor);
                                 if (color) {
@@ -571,7 +556,7 @@ async def extract_elements_from_html(html_content: str):
                                     });
                                 }
                             }
-                            
+
                             if (stops.length >= 2) {
                                 return {
                                     type: 'linear',
@@ -580,16 +565,16 @@ async def extract_elements_from_html(html_content: str):
                                 };
                             }
                         }
-                        
+
                         // Parse radial-gradient(position, color1 stop1, color2 stop2, ...)
                         const radialMatch = gradientStr.match(/radial-gradient\\(([^)]+)\\)/);
                         if (radialMatch) {
                             let content = radialMatch[1];
                             const stops = [];
-                            
+
                             // Remove position syntax like "circle at 20% 30%" - we'll use default center
                             content = content.replace(/circle\\s+at\\s+[^,]+/gi, '');
-                            
+
                             // Extract color stops (include transparent, blend with background)
                             const stopPattern = /(#[0-9a-fA-F]{6}|rgba?\\([^)]+\\)|transparent)(?:\\s+(\\d+(?:\\.\\d+)?)%?)?/gi;
                             let match;
@@ -597,7 +582,7 @@ async def extract_elements_from_html(html_content: str):
                                 const colorStr = match[1];
                                 const positionStr = match[2] || (stops.length === 0 ? '0' : '100');
                                 const position = parseFloat(positionStr) / 100;
-                                
+
                                 // Parse color, blending transparent with background
                                 const color = parseColor(colorStr, bgColor);
                                 if (color) {
@@ -607,7 +592,7 @@ async def extract_elements_from_html(html_content: str):
                                     });
                                 }
                             }
-                            
+
                             if (stops.length >= 2) {
                                 return {
                                     type: 'radial',
@@ -615,10 +600,10 @@ async def extract_elements_from_html(html_content: str):
                                 };
                             }
                         }
-                        
+
                         return null;
                     };
-                    
+
                     // Body background - check body and full-screen child elements
                     const body = document.body;
                     if (body) {
@@ -626,7 +611,7 @@ async def extract_elements_from_html(html_content: str):
                         let bgColor = parseColor(window.getComputedStyle(body).backgroundColor);
                         let bgGradient = null;
                         let bgImageUrl = null;
-                        
+
                         // Check body for gradients and background images
                         const bodyStyles = window.getComputedStyle(body);
                         if (bodyStyles.backgroundImage && bodyStyles.backgroundImage !== 'none') {
@@ -643,7 +628,7 @@ async def extract_elements_from_html(html_content: str):
                         if (!bgGradient && bodyStyles.background && bodyStyles.background.includes('gradient')) {
                             bgGradient = parseGradient(bodyStyles.background, bgColor);
                         }
-                        
+
                         // Always check child elements that cover the screen for gradients, background images, and background color
                         // Child gradients/images often represent the actual visual background
                         const children = Array.from(body.children);
@@ -652,13 +637,13 @@ async def extract_elements_from_html(html_content: str):
                             // Check if child covers most of the screen (likely a background element)
                             if (childRect.width >= bodyRect.width * 0.8 && childRect.height >= bodyRect.height * 0.8) {
                                 const childStyles = window.getComputedStyle(child);
-                                
+
                                 // First, get child background color (use it as base color for blending)
                                 const childBgColor = parseColor(childStyles.backgroundColor);
                                 if (childBgColor && childBgColor.a > 0) {
                                     bgColor = childBgColor; // Use child background color as base
                                 }
-                                
+
                                 // Check for gradients and background images in backgroundImage
                                 // Use child bgColor for blending transparent colors in gradients
                                 const blendColor = (childBgColor && childBgColor.a > 0) ? childBgColor : bgColor;
@@ -684,7 +669,7 @@ async def extract_elements_from_html(html_content: str):
                                         break; // Found gradient, use it
                                     }
                                 }
-                                
+
                                 // Also check background-image property (Tailwind might use this)
                                 if (!bgGradient && !bgImageUrl && childStyles.backgroundImage && childStyles.backgroundImage !== 'none') {
                                     // Try to parse even if it doesn't explicitly say "gradient" (Tailwind uses CSS variables)
@@ -699,7 +684,7 @@ async def extract_elements_from_html(html_content: str):
                                 }
                             }
                         }
-                        
+
                         // Always check child background color if it covers the screen
                         // Child background color often represents the actual visual background
                         // Prefer child color over body color if child covers most of the screen
@@ -715,7 +700,7 @@ async def extract_elements_from_html(html_content: str):
                                 }
                             }
                         }
-                        
+
                         // If we have a gradient but no color, use the darkest/most opaque stop as fallback
                         if (bgGradient && bgGradient.stops && bgGradient.stops.length > 0 && (!bgColor || bgColor.a <= 0)) {
                             // Find the darkest, most opaque stop
@@ -737,7 +722,7 @@ async def extract_elements_from_html(html_content: str):
                                 bgColor = bgGradient.stops[0].color;
                             }
                         }
-                        
+
                         // Always add background element if we have color, gradient, or image
                         // Prefer the actual background color over gradient stop colors
                         if (bgColor && bgColor.a >= 0) {
@@ -791,27 +776,21 @@ async def extract_elements_from_html(html_content: str):
                             elements.push(bgElem);
                         }
                     }
-                    
+
                     // Shapes, text backgrounds, styled_text
                     const allDivs = document.querySelectorAll('div, section, aside, header, footer, span');
                     const processedTextElements = new Set();
                     const styledTextElements = new Set(); // Track elements extracted as styled_text
-                    
+
                     allDivs.forEach(el => {
                         const styles = window.getComputedStyle(el);
                         const rect = el.getBoundingClientRect();
                         if (rect.width < 2 || rect.height < 2) return;
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
-                        
+
                         let bgColor = parseColor(styles.backgroundColor);
                         let gradient = null;
-                        
-                        // Debug: log backgroundImage for full-screen elements
-                        if (rect.width >= 1800 && rect.height >= 1000) {
-                            console.log('Full-screen element backgroundImage:', styles.backgroundImage);
-                            console.log('Full-screen element background:', styles.background);
-                        }
-                        
+
                         // Get parent background color for blending transparent gradients
                         let parentBgColor = bgColor;
                         const parent = el.parentElement;
@@ -834,7 +813,7 @@ async def extract_elements_from_html(html_content: str):
                                 gradient = parseGradient(bgImg, blendBgColor);
                             }
                         }
-                        
+
                         // If no gradient found, try background property
                         if (!gradient && styles.background && styles.background !== 'none') {
                             const bg = styles.background;
@@ -842,12 +821,12 @@ async def extract_elements_from_html(html_content: str):
                                 gradient = parseGradient(bg, blendBgColor);
                             }
                         }
-                        
+
                         // Fallback to solid color if no gradient
                         if (!gradient && (!bgColor || bgColor.a < 0.1)) {
                             bgColor = parseColor(styles.backgroundImage);
                         }
-                        
+
                         // Extract border information for all four sides
                         const borderTopColor = parseColor(styles.borderTopColor);
                         const borderTopWidth = parseFloat(styles.borderTopWidth);
@@ -861,7 +840,7 @@ async def extract_elements_from_html(html_content: str):
                         const borderLeftColor = parseColor(styles.borderLeftColor);
                         const borderLeftWidth = parseFloat(styles.borderLeftWidth);
                         const borderLeftStyle = styles.borderLeftStyle || 'solid';
-                        
+
                         // For backward compatibility, use top border as default
                         const borderColor = borderTopColor;
                         const borderWidth = borderTopWidth;
@@ -869,7 +848,7 @@ async def extract_elements_from_html(html_content: str):
                         const borderRadius = parseFloat(styles.borderRadius) || 0;
                         // Ensure it's a valid number (handle NaN)
                         const borderRadiusValue = (isNaN(borderRadius) || !isFinite(borderRadius)) ? 0 : borderRadius;
-                        
+
                         // Store individual side borders
                         const borders = {
                             top: borderTopWidth > 0 ? { color: borderTopColor, width: borderTopWidth } : null,
@@ -877,12 +856,12 @@ async def extract_elements_from_html(html_content: str):
                             bottom: borderBottomWidth > 0 ? { color: borderBottomColor, width: borderBottomWidth } : null,
                             left: borderLeftWidth > 0 ? { color: borderLeftColor, width: borderLeftWidth } : null
                         };
-                        
+
                         const aspectRatio = rect.width / rect.height;
                         const isSquareish = aspectRatio > 0.8 && aspectRatio < 1.2;
                         const minDimension = Math.min(rect.width, rect.height);
                         const isCircle = isSquareish && borderRadius >= (minDimension / 2) * 0.9;
-                        
+
                         // Check for CSS border triangles 
                         // Pattern: small element, all borders present, some borders transparent (rgba(0,0,0,0))
                         const hasTransparentBorder = (
@@ -901,12 +880,12 @@ async def extract_elements_from_html(html_content: str):
                                           borderBottomWidth > 0 || borderLeftWidth > 0;
                         const isSmallElement = rect.width < 50 && rect.height < 50;
                         const isCSSTriangle = isSmallElement && hasBorders && hasTransparentBorder && hasOpaqueBorder;
-                        
+
                         const text = (el.innerText || el.textContent).trim();
                         const hasBlockChildren = el.querySelectorAll('div, p, h1, h2, h3, h4, h5, h6, li, ul, ol').length > 0;
                         const isLargeEnough = rect.width > 60 && rect.height > 20;
                         const isInsideSemanticElement = el.closest('h1, h2, h3, h4, h5, h6, p, li, button, a, label') !== null;
-                        
+
                         // Check for gradient text (background-clip: text) - do this before styled_text check
                         let textGradient = null;
                         const backgroundClip = styles.webkitBackgroundClip || styles.backgroundClip;
@@ -917,7 +896,7 @@ async def extract_elements_from_html(html_content: str):
                                              textFillColor === 'rgba(0,0,0,0)' ||
                                              (textFillColor && textFillColor.match(/rgba?\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)/));
                         const isGradientText = backgroundClip === 'text' && isTransparent;
-                        
+
                         if (isGradientText) {
                             // Extract gradient from background-image
                             const bgImage = styles.backgroundImage || styles.background;
@@ -926,14 +905,14 @@ async def extract_elements_from_html(html_content: str):
                                 textGradient = parseGradient(bgImage, { r: 255, g: 255, b: 255, a: 1 });
                             }
                         }
-                        
+
                         // Check if it's a small circular badge/pill (like initials in circles)
                         const isSmallCircularBadge = text && text.length <= 3 && 
                                                      isSquareish && 
                                                      borderRadius >= (minDimension / 2) * 0.8 &&
                                                      bgColor && bgColor.a >= 0 &&
                                                      rect.width <= 60 && rect.height <= 60;
-                        
+
                         // Don't create styled_text or shapes if text has a gradient - let it be created as regular text instead
                         // This prevents creating a background shape with gradient behind gradient text
                         if (textGradient) {
@@ -950,7 +929,7 @@ async def extract_elements_from_html(html_content: str):
                                 const fonts = styles.fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
                                 fontFamily = fonts[0] || 'Arial';
                             }
-                            
+
                             elements.push({
                                 type: 'text',
                                 text: text,
@@ -970,7 +949,7 @@ async def extract_elements_from_html(html_content: str):
                             processedTextElements.add(el);
                             return;
                         }
-                        
+
                         if (text && !hasBlockChildren && bgColor && bgColor.a >= 0 && (isLargeEnough || isSmallCircularBadge) && (!isInsideSemanticElement || isSmallCircularBadge) && !textGradient) {
                             const textColor = parseColor(styles.color) || { r: 255, g: 255, b: 255, a: 1 };
                             const fontSize = parseFloat(styles.fontSize);
@@ -979,7 +958,7 @@ async def extract_elements_from_html(html_content: str):
                                 const fonts = styles.fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
                                 fontFamily = fonts[0] || 'Arial';
                             }
-                            
+
                             elements.push({
                                 type: 'styled_text',
                                 text: text,
@@ -1009,7 +988,7 @@ async def extract_elements_from_html(html_content: str):
                             let triangleWidth = 0;
                             let triangleHeight = 0;
                             let triangleDirection = 'up'; // up, down, left, right
-                            
+
                             // Check which border creates the triangle (the non-transparent one)
                             if (borderBottomWidth > 0 && borderBottomColor && borderBottomColor.a > 0) {
                                 // Triangle pointing up (border-bottom is colored)
@@ -1036,7 +1015,7 @@ async def extract_elements_from_html(html_content: str):
                                 triangleHeight = Math.max(borderTopWidth, borderBottomWidth) * 2;
                                 triangleDirection = 'right';
                             }
-                            
+
                             if (triangleColor && triangleWidth > 0 && triangleHeight > 0) {
                                 elements.push({
                                     type: 'shape',
@@ -1076,7 +1055,7 @@ async def extract_elements_from_html(html_content: str):
                             });
                         }
                     });
-                    
+
                     // Tables
                     const processedTableElements = new Set();
                     document.querySelectorAll('table').forEach(table => {
@@ -1085,18 +1064,18 @@ async def extract_elements_from_html(html_content: str):
                         if (rect.width === 0 || rect.height === 0) return;
                         const styles = window.getComputedStyle(table);
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
-                        
+
                         const rows = [];
                         table.querySelectorAll('tr').forEach(tr => {
                             const cells = [];
                             tr.querySelectorAll('th, td').forEach((cell, cellIndex, allCells) => {
                                 const cellStyles = window.getComputedStyle(cell);
                                 const cellRect = cell.getBoundingClientRect();
-                                
+
                                 // Check for ::after pseudo-element (vertical separator on right)
                                 const afterStyles = window.getComputedStyle(cell, '::after');
                                 const hasAfterSeparator = afterStyles && afterStyles.content !== 'none' && afterStyles.width && parseFloat(afterStyles.width) > 0;
-                                
+
                                 // Extract color from ::after - handle gradients
                                 let afterColor = null;
                                 if (hasAfterSeparator) {
@@ -1115,11 +1094,11 @@ async def extract_elements_from_html(html_content: str):
                                         afterColor = { r: 176, g: 176, b: 176, a: 1 };
                                     }
                                 }
-                                
+
                                 // Check for ::before pseudo-element (vertical separator on left)
                                 const beforeStyles = window.getComputedStyle(cell, '::before');
                                 const hasBeforeSeparator = beforeStyles && beforeStyles.content !== 'none' && beforeStyles.width && parseFloat(beforeStyles.width) > 0;
-                                
+
                                 // Extract color from ::before - handle gradients
                                 let beforeColor = null;
                                 if (hasBeforeSeparator) {
@@ -1138,7 +1117,7 @@ async def extract_elements_from_html(html_content: str):
                                         beforeColor = { r: 176, g: 176, b: 176, a: 1 };
                                     }
                                 }
-                                
+
                                 cells.push({
                                     text: cell.textContent.trim(),
                                     is_header: cell.tagName.toLowerCase() === 'th',
@@ -1185,7 +1164,7 @@ async def extract_elements_from_html(html_content: str):
                             table.querySelectorAll('*').forEach(child => processedTableElements.add(child));
                         }
                     });
-                    
+
                     // Images - extract all images, even if parent elements are processed
                     // Images should be extracted separately from their containers
                     // But first, mark parent elements that contain images so they can still create shapes
@@ -1195,21 +1174,21 @@ async def extract_elements_from_html(html_content: str):
                             imageParents.add(img.parentElement);
                         }
                     });
-                    
+
                     document.querySelectorAll('img').forEach(img => {
                         // Skip if image is already processed as part of a table or styled_text
                         if (processedTableElements.has(img) || styledTextElements.has(img)) return;
-                        
+
                         const rect = img.getBoundingClientRect();
                         if (rect.width === 0 || rect.height === 0) return;
                         const styles = window.getComputedStyle(img);
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
-                        
+
                         // Get border radius from image first
                         let borderRadius = parseFloat(styles.borderRadius) || 0;
                         let isCircle = false;
                         let containerRect = rect;
-                        
+
                         // If image has no border radius, check parent container
                         // Parent containers often have border-radius and overflow:hidden to clip images
                         if (borderRadius === 0 || isNaN(borderRadius)) {
@@ -1218,14 +1197,14 @@ async def extract_elements_from_html(html_content: str):
                                 const parentStyles = window.getComputedStyle(parent);
                                 const parentBorderRadius = parseFloat(parentStyles.borderRadius) || 0;
                                 const parentOverflow = parentStyles.overflow;
-                                
+
                                 // If parent has border-radius and overflow:hidden, inherit it
                                 if (parentBorderRadius > 0 && (parentOverflow === 'hidden' || parentOverflow === 'clip')) {
                                     borderRadius = parentBorderRadius;
                                 }
                             }
                         }
-                        
+
                         const parent = img.parentElement;
                         if (parent) {
                             const parentStyles = window.getComputedStyle(parent);
@@ -1250,21 +1229,21 @@ async def extract_elements_from_html(html_content: str):
                             const minDimension = Math.min(rect.width, rect.height);
                             isCircle = isSquareish && borderRadius >= (minDimension / 2) * 0.9;
                         }
-                        
+
                         // Skip if image hasn't loaded (naturalWidth/Height will be 0)
                         // But still include it if it has a valid src
                         if (img.naturalWidth === 0 && img.naturalHeight === 0 && img.src && !img.src.startsWith('data:')) {
                             // Image might still be loading, but include it anyway
                             // The Python code will handle loading errors
                         }
-                        
+
                         // Detect image alignment from CSS
                         let imageAlign = 'left';  // Default
                         const marginLeft = styles.marginLeft;
                         const marginRight = styles.marginRight;
                         const display = styles.display;
                         const float = styles.float || styles.cssFloat;
-                        
+
                         // Check for centered image (margin: auto or parent text-align: center)
                         if (display === 'block' && marginLeft === 'auto' && marginRight === 'auto') {
                             imageAlign = 'center';
@@ -1277,14 +1256,14 @@ async def extract_elements_from_html(html_content: str):
                                 imageAlign = 'right';
                             }
                         }
-                        
+
                         // Check float property
                         if (float === 'right') {
                             imageAlign = 'right';
                         } else if (float === 'left') {
                             imageAlign = 'left';
                         }
-                        
+
                         elements.push({
                             type: 'image',
                             src: img.src,
@@ -1298,19 +1277,19 @@ async def extract_elements_from_html(html_content: str):
                             alignment: imageAlign
                         });
                     });
-                    
+
                     // Font Awesome icons - extract as icon elements for PNG rendering
                     document.querySelectorAll('i[class*="fa-"]').forEach(icon => {
                         const rect = icon.getBoundingClientRect();
                         if (rect.width === 0 || rect.height === 0) return;
                         const styles = window.getComputedStyle(icon);
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
-                        
+
                         // Extract icon name and style
                         let iconName = '';
                         let iconStyle = 'solid'; // Default to solid
                         const classList = icon.className.split(' ');
-                        
+
                         for (const className of classList) {
                             if (className === 'fa-solid' || className === 'fas') iconStyle = 'solid';
                             else if (className === 'fa-regular' || className === 'far') iconStyle = 'regular';
@@ -1320,11 +1299,11 @@ async def extract_elements_from_html(html_content: str):
                                 iconName = className.replace('fa-', '');
                             }
                         }
-                        
+
                         if (iconName) {
                             const iconColor = parseColor(styles.color) || { r: 0, g: 0, b: 0, a: 1 };
                             const fontSize = parseFloat(styles.fontSize);
-                            
+
                             elements.push({
                                 type: 'icon',
                                 icon_name: iconName,
@@ -1335,27 +1314,27 @@ async def extract_elements_from_html(html_content: str):
                             });
                         }
                     });
-                    
+
                     // Text
                     const semanticElements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, li, button, a, label, td, th');
                     const processedByParent = new Set();
-                    
+
                     semanticElements.forEach(el => {
                         if (processedTextElements.has(el) || processedTableElements.has(el)) return;
-                        
+
                         // Check if this element contains any styled_text children (badges) or icons
                         const styledTextChildren = Array.from(el.querySelectorAll('*')).filter(child => {
                             return styledTextElements.has(child);
                         });
-                        
+
                         // Check if this element contains Font Awesome icons
                         const iconChildren = Array.from(el.querySelectorAll('i[class*="fa-"]'));
-                        
+
                         const styles = window.getComputedStyle(el);
                         const rect = el.getBoundingClientRect();
                         if (rect.width === 0 || rect.height === 0) return;
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
-                        
+
                         const fontSize = parseFloat(styles.fontSize);
                         const textColor = parseColor(styles.color) || { r: 0, g: 0, b: 0, a: 1 };
                         let fontFamily = 'Arial';
@@ -1365,7 +1344,7 @@ async def extract_elements_from_html(html_content: str):
                         }
                         const borderColor = parseColor(styles.borderColor || styles.borderTopColor);
                         const borderWidth = parseFloat(styles.borderWidth || styles.borderTopWidth || 0);
-                        
+
                         // Check for gradient text (background-clip: text)
                         let textGradient = null;
                         const backgroundClip = styles.webkitBackgroundClip || styles.backgroundClip;
@@ -1376,7 +1355,7 @@ async def extract_elements_from_html(html_content: str):
                                              textFillColor === 'rgba(0,0,0,0)' ||
                                              (textFillColor && textFillColor.match(/rgba?\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)/));
                         const isGradientText = backgroundClip === 'text' && isTransparent;
-                        
+
                         if (isGradientText) {
                             // Extract gradient from background-image
                             const bgImage = styles.backgroundImage || styles.background;
@@ -1385,14 +1364,14 @@ async def extract_elements_from_html(html_content: str):
                                 textGradient = parseGradient(bgImage, { r: 255, g: 255, b: 255, a: 1 });
                             }
                         }
-                        
+
                         // If element contains inline badges or icons, extract text segments around them
                         if (styledTextChildren.length > 0 || iconChildren.length > 0) {
                             const hasInlineBadges = styledTextChildren.some(badge => {
                                 const badgeRect = badge.getBoundingClientRect();
                                 return badgeRect.width <= 60 && badgeRect.height <= 60;
                             });
-                            
+
                             if (hasInlineBadges || iconChildren.length > 0) {
                                 // Extract text segments by walking child nodes
                                 // This creates separate text elements for segments before/after badges
@@ -1429,9 +1408,9 @@ async def extract_elements_from_html(html_content: str):
                                     }
                                     return segments;
                                 };
-                                
+
                                 const textSegments = extractTextSegments(el);
-                                
+
                                 // Create text elements for each segment
                                 textSegments.forEach(segment => {
                                     if (segment.text && segment.width > 0 && segment.height > 0) {
@@ -1453,7 +1432,7 @@ async def extract_elements_from_html(html_content: str):
                                         });
                                     }
                                 });
-                                
+
                                 // Mark as processed
                                 processedTextElements.add(el);
                                 el.querySelectorAll('*').forEach(child => {
@@ -1462,7 +1441,7 @@ async def extract_elements_from_html(html_content: str):
                                 return;
                             }
                         }
-                        
+
                         // Check for child elements with gradient text (like spans with gradient-text class)
                         // Extract them separately to preserve gradient information
                         // Check all inline and text-level elements, not just specific ones
@@ -1477,7 +1456,7 @@ async def extract_elements_from_html(html_content: str):
                                                  (childTextFillColor && childTextFillColor.match(/rgba?\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)/));
                             return childBackgroundClip === 'text' && isTransparent;
                         });
-                        
+
                         // If there are gradient text children, extract text segments
                         if (gradientTextChildren.length > 0) {
                             const extractTextSegments = (parentEl) => {
@@ -1512,7 +1491,7 @@ async def extract_elements_from_html(html_content: str):
                                                              childTextFillColor === 'rgba(0,0,0,0)' ||
                                                              (childTextFillColor && childTextFillColor.match(/rgba?\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)/));
                                         const isGradientText = childBackgroundClip === 'text' && isTransparent;
-                                        
+
                                         let childGradient = null;
                                         if (isGradientText) {
                                             const bgImage = childStyles.backgroundImage || childStyles.background;
@@ -1520,7 +1499,7 @@ async def extract_elements_from_html(html_content: str):
                                                 childGradient = parseGradient(bgImage, { r: 255, g: 255, b: 255, a: 1 });
                                             }
                                         }
-                                        
+
                                         const childText = (childEl.innerText || childEl.textContent).trim();
                                         if (childText) {
                                             const childRect = childEl.getBoundingClientRect();
@@ -1537,9 +1516,9 @@ async def extract_elements_from_html(html_content: str):
                                 }
                                 return segments;
                             };
-                            
+
                             const textSegments = extractTextSegments(el);
-                            
+
                             // If we have multiple segments, combine them into a single text element with proper spacing
                             // This prevents gaps between text segments (like "Seamless" and "Integration")
                             if (textSegments.length > 1) {
@@ -1549,11 +1528,11 @@ async def extract_elements_from_html(html_content: str):
                                 const lastSegment = textSegments[textSegments.length - 1];
                                 const combinedWidth = lastSegment.x + lastSegment.width - firstSegment.x;
                                 const combinedHeight = Math.max(...textSegments.map(s => s.height));
-                                
+
                                 // Use gradient from any segment that has it, or parent gradient
                                 const segmentWithGradient = textSegments.find(s => s.gradient) || null;
                                 const finalGradient = segmentWithGradient ? segmentWithGradient.gradient : textGradient;
-                                
+
                                 elements.push({
                                     type: 'text',
                                     text: combinedText,
@@ -1592,7 +1571,7 @@ async def extract_elements_from_html(html_content: str):
                                     });
                                 }
                             }
-                            
+
                             // Mark as processed
                             processedTextElements.add(el);
                             el.querySelectorAll('*').forEach(child => {
@@ -1600,14 +1579,14 @@ async def extract_elements_from_html(html_content: str):
                             });
                             return;
                         }
-                        
+
                         // No inline badges or gradient text children - extract full text normally
                         let text = (el.innerText || el.textContent).trim();
                         if (!text) return;
-                        
+
                         if (!el.querySelector('br')) text = text.replace(/\\s+/g, ' ');
                         else text = text.replace(/[ \\t]+/g, ' ').replace(/\\n\\n+/g, '\\n');
-                        
+
                         // Check if this is a list item and extract bullet information
                         let bulletInfo = null;
                         if (el.tagName.toLowerCase() === 'li') {
@@ -1615,7 +1594,7 @@ async def extract_elements_from_html(html_content: str):
                             // We can't directly access ::before, but we can check computed styles
                             const listStyleType = styles.listStyleType;
                             const hasCustomBullet = listStyleType && listStyleType !== 'none' && listStyleType !== 'disc';
-                            
+
                             // Check for separate bullet elements (small circular elements before text)
                             const firstChild = el.firstElementChild;
                             let bulletElement = null;
@@ -1627,7 +1606,7 @@ async def extract_elements_from_html(html_content: str):
                                 const firstChildAspectRatio = firstChildRect.width / firstChildRect.height;
                                 const firstChildIsSquareish = firstChildAspectRatio > 0.8 && firstChildAspectRatio < 1.2;
                                 const firstChildMinDimension = Math.min(firstChildRect.width, firstChildRect.height);
-                                
+
                                 // Check if first child is a bullet (small circular element)
                                 if (firstChildRect.width <= 60 && firstChildRect.height <= 60 &&
                                     firstChildIsSquareish &&
@@ -1636,12 +1615,12 @@ async def extract_elements_from_html(html_content: str):
                                     bulletElement = firstChild;
                                 }
                             }
-                            
+
                             // Extract bullet color and style
                             if (bulletElement || hasCustomBullet) {
                                 let bulletColor = textColor; // Default to text color
                                 let bulletSize = fontSize * 0.6; // Default bullet size relative to font
-                                
+
                                 if (bulletElement) {
                                     const bulletStyles = window.getComputedStyle(bulletElement);
                                     const bulletBgColor = parseColor(bulletStyles.backgroundColor);
@@ -1659,7 +1638,7 @@ async def extract_elements_from_html(html_content: str):
                                         bulletColor = beforeBgColor;
                                     }
                                 }
-                                
+
                                 // Determine bullet type based on shape
                                 let bulletType = 'circle'; // Default
                                 if (bulletElement) {
@@ -1669,7 +1648,7 @@ async def extract_elements_from_html(html_content: str):
                                     const bulletAspectRatio = bulletRect.width / bulletRect.height;
                                     const bulletIsSquareish = bulletAspectRatio > 0.8 && bulletAspectRatio < 1.2;
                                     const bulletMinDimension = Math.min(bulletRect.width, bulletRect.height);
-                                    
+
                                     if (bulletIsSquareish && bulletBorderRadius >= (bulletMinDimension / 2) * 0.9) {
                                         bulletType = 'circle';
                                     } else if (bulletBorderRadius < 2) {
@@ -1683,7 +1662,7 @@ async def extract_elements_from_html(html_content: str):
                                     else if (listStyleType.includes('square')) bulletType = 'square';
                                     else if (listStyleType.includes('disc')) bulletType = 'disc';
                                 }
-                                
+
                                 bulletInfo = {
                                     color: bulletColor,
                                     size: bulletSize,
@@ -1691,7 +1670,7 @@ async def extract_elements_from_html(html_content: str):
                                 };
                             }
                         }
-                        
+
                         const textElement = {
                             type: 'text',
                             text: text,
@@ -1708,12 +1687,12 @@ async def extract_elements_from_html(html_content: str):
                             border_width: borderWidth,
                             text_gradient: textGradient
                         };
-                        
+
                         // Add bullet information if present
                         if (bulletInfo) {
                             textElement.bullet = bulletInfo;
                         }
-                        
+
                         elements.push(textElement);
                         processedByParent.add(el);
                         processedTextElements.add(el);
@@ -1722,12 +1701,12 @@ async def extract_elements_from_html(html_content: str):
                             processedTextElements.add(child);
                         });
                     });
-                    
+
                     // Remaining Text
                     document.querySelectorAll('*').forEach(el => {
                         if (processedTextElements.has(el) || processedTableElements.has(el) || processedByParent.has(el)) return;
                         if (el.closest('h1, h2, h3, h4, h5, h6, p, li, button, a, label, td, th')) return;
-                        
+
                         let hasDirectText = false;
                         for (const node of el.childNodes) {
                             if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0) {
@@ -1735,16 +1714,16 @@ async def extract_elements_from_html(html_content: str):
                             }
                         }
                         if (!hasDirectText) return;
-                        
+
                         const text = (el.innerText || el.textContent).trim();
                         if (!text) return;
-                        
+
                         const styles = window.getComputedStyle(el);
                         const rect = el.getBoundingClientRect();
                         if (rect.width === 0 || rect.height === 0) return;
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
                         if (el.querySelectorAll('div, p, h1, h2, h3, h4, h5, h6, li, ul, ol').length > 0) return;
-                        
+
                         const fontSize = parseFloat(styles.fontSize);
                         const textColor = parseColor(styles.color) || { r: 0, g: 0, b: 0, a: 1 };
                         let fontFamily = 'Arial';
@@ -1752,10 +1731,10 @@ async def extract_elements_from_html(html_content: str):
                              const fonts = styles.fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
                              fontFamily = fonts[0] || 'Arial';
                         }
-                        
+
                         const borderColor = parseColor(styles.borderColor || styles.borderTopColor);
                         const borderWidth = parseFloat(styles.borderWidth || styles.borderTopWidth || 0);
-                        
+
                         elements.push({
                             type: 'text',
                             text: text,
@@ -1772,11 +1751,11 @@ async def extract_elements_from_html(html_content: str):
                             border_width: borderWidth
                         });
                     });
-                    
+
                     return elements;
                 }
             """)
-            
+
             # Capture canvas elements (ONLY for Chart.js charts, not all canvases)
             # Query only canvas elements that have Chart.js instances
             canvas_info = await page.evaluate("""
@@ -1784,23 +1763,23 @@ async def extract_elements_from_html(html_content: str):
                     const canvases = [];
                     // Only process canvases if Chart.js is loaded
                     if (!window.Chart) return canvases;
-                    
+
                     document.querySelectorAll('canvas').forEach((canvas, index) => {
                         const rect = canvas.getBoundingClientRect();
                         const styles = window.getComputedStyle(canvas);
-                        
+
                         // Skip hidden canvases
                         if (rect.width === 0 || rect.height === 0) return;
                         if (styles.display === 'none' || styles.visibility === 'hidden') return;
-                        
+
                         // IMPORTANT: Only screenshot canvases that have Chart.js instances
                         // Skip regular drawing canvases, Paint apps, etc.
                         const hasChart = Object.values(window.Chart.instances || {}).some(
                             chart => chart.canvas === canvas
                         );
-                        
+
                         if (!hasChart) return;
-                        
+
                         canvases.push({
                             index: index,
                             x: rect.left,
@@ -1812,21 +1791,21 @@ async def extract_elements_from_html(html_content: str):
                     return canvases;
                 }
             """)
-            
+
             # Screenshot each canvas and add to elements
             if canvas_info and len(canvas_info) > 0:
                 for canvas in canvas_info:
                     try:
                         # Get the canvas element by index
                         canvas_element = page.locator(f'canvas').nth(canvas['index'])
-                        
+
                         # Take screenshot of the canvas element
                         screenshot_bytes = await canvas_element.screenshot()
-                        
+
                         # Convert to base64 data URL
                         screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
                         data_url = f"data:image/png;base64,{screenshot_base64}"
-                        
+
                         # Add as an image element
                         elements.append({
                             'type': 'image',
@@ -1846,10 +1825,8 @@ async def extract_elements_from_html(html_content: str):
                             'alignment': 'left'
                         })
                     except Exception as e:
-                        # Skip this canvas if screenshot fails
-                        print(f"    ⚠ Failed to screenshot canvas {canvas['index']}: {e}", file=sys.stderr)
                         pass
-            
+
             # Download and render Font Awesome icons as PNG
             icon_elements = [e for e in elements if e.get('type') == 'icon']
             if icon_elements:
@@ -1859,31 +1836,28 @@ async def extract_elements_from_html(html_content: str):
                         icon_style = icon_elem.get('icon_style', 'solid')
                         color = icon_elem.get('color', {'r': 0, 'g': 0, 'b': 0, 'a': 1})
                         size = int(icon_elem.get('size', 24))
-                        
+
                         # Download and render icon using browser
                         icon_png = await download_fontawesome_icon_png(
                             icon_name, icon_style, color, size, page  # Pass Playwright page as browser_context
                         )
-                        
+
                         if icon_png:
                             # Convert PNG bytes to base64 data URL
                             icon_png.seek(0)
                             icon_base64 = base64.b64encode(icon_png.read()).decode('utf-8')
                             icon_elem['png_data'] = f"data:image/png;base64,{icon_base64}"
-                        
+
                     except Exception as e:
-                        print(f"    ⚠ Icon download/render failed for {icon_name}: {e}", file=sys.stderr)
-                        # Icon download failed, will skip icon
                         pass
-            
+
         finally:
             await browser.close()
-        
+
         if not isinstance(elements, list):
             elements = []
-        
-        return elements
 
+        return elements
 
 def create_pptx_from_elements(prs, elements_json):
     """
@@ -1892,14 +1866,14 @@ def create_pptx_from_elements(prs, elements_json):
     """
     blank_layout = prs.slide_layouts[6]
     slide = prs.slides.add_slide(blank_layout)
-    
+
     background_elem = next((e for e in elements_json if e.get('type') == 'background'), None)
     if background_elem:
         try:
             bg_gradient = background_elem.get('gradient')
             bg_color = background_elem.get('color')
             bg_image_url = background_elem.get('image_url')
-            
+
             # If there's a background image, add it as a full-slide picture
             if bg_image_url:
                 try:
@@ -1919,29 +1893,29 @@ def create_pptx_from_elements(prs, elements_json):
                         # Assume it's a local file path
                         with open(bg_image_url, 'rb') as f:
                             img_data = f.read()
-                    
+
                     original_size = len(img_data)
-                    
+
                     # Compress and optimize the image (maintain_dimensions=True to keep original aspect ratio)
                     img_stream = io.BytesIO(img_data)
                     img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
-                    
+
                     compressed_size = img_stream.getbuffer().nbytes
-                    
+
                     # Add background image as a full-slide picture
                     left = Inches(0)
                     top = Inches(0)
                     width = Inches(SLIDE_WIDTH_INCHES)
                     height = Inches(SLIDE_HEIGHT_INCHES)
-                    
+
                     pic = slide.shapes.add_picture(img_stream, left, top, width, height)
-                    
+
                     # Send background image to back so all other elements appear on top
                     slide.shapes._spTree.remove(pic._element)
                     slide.shapes._spTree.insert(2, pic._element)
                 except Exception as e:
                     pass
-            
+
             # If there's a gradient, create a full-slide shape with gradient
             # (PowerPoint slide backgrounds don't support gradients directly)
             # This will be layered on top of the background image if both exist
@@ -1954,7 +1928,7 @@ def create_pptx_from_elements(prs, elements_json):
                 )
                 bg_shape.line.fill.background()
                 gradient_applied = apply_gradient_fill(bg_shape, bg_gradient)
-                
+
                 # If gradient failed, fall back to solid color
                 if not gradient_applied and bg_color:
                     bg_shape.fill.solid()
@@ -1962,7 +1936,7 @@ def create_pptx_from_elements(prs, elements_json):
                     bg_shape.fill.fore_color.rgb = RGBColor(r, g, b)
                 elif not gradient_applied:
                     pass
-                
+
                 # Send background shape to back so all other elements appear on top
                 # Insert after background image if present
                 slide.shapes._spTree.remove(bg_shape._element)
@@ -1974,32 +1948,30 @@ def create_pptx_from_elements(prs, elements_json):
                 r, g, b = blend_transparent_color(bg_color, (255, 255, 255))
                 slide.background.fill.fore_color.rgb = RGBColor(r, g, b)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
             pass
-    
+
     type_order = {'shape': 1, 'table': 2, 'text': 3, 'styled_text': 4, 'image': 5, 'icon': 5}
-    
+
     text_elements_by_position = {}
     sorted_elements = sorted(
         [e for e in elements_json if e.get('type') != 'background'],
         key=lambda e: type_order.get(e.get('type', ''), 99)
     )
-    
+
     for elem in sorted_elements:
         elem_type = elem.get('type')
         if not elem_type:
             continue
-        
+
         coords = elem.get('coordinates', {})
         if not coords or coords.get('width', 0) <= 0 or coords.get('height', 0) <= 0:
             continue
-        
+
         left = pixels_to_inches(coords['x'])
         top = pixels_to_inches(coords['y'])
         width = pixels_to_inches(coords['width'])
         height = pixels_to_inches(coords['height'])
-        
+
         if elem_type == 'shape':
             create_shape_element(slide, elem, left, top, width, height)
         elif elem_type == 'table':
@@ -2014,12 +1986,12 @@ def create_pptx_from_elements(prs, elements_json):
                     header, encoded = png_data_url.split(',', 1)
                     img_data = base64.b64decode(encoded)
                     img_stream = io.BytesIO(img_data)
-                    
+
                     # Get original image dimensions to preserve aspect ratio
                     img = Image.open(img_stream)
                     original_width_px, original_height_px = img.size
                     img_stream.seek(0)  # Reset stream for pptx.add_picture
-                    
+
                     # Calculate constrained dimensions
                     aspect_ratio = original_width_px / original_height_px
                     if width / height > aspect_ratio:  # Bounding box is wider than image
@@ -2028,25 +2000,22 @@ def create_pptx_from_elements(prs, elements_json):
                     else:  # Bounding box is taller than image
                         new_height = width / aspect_ratio
                         new_width = width
-                    
+
                     pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top),
                                                   width=Inches(new_width), height=Inches(new_height))
-                    
+
                     # Disable shadow on icon images
                     pic.shadow.inherit = False
-                    
+
                     # Remove border from icon images
                     pic.line.fill.background()
                 except Exception as e:
-                    print(f"    ⚠ Failed to insert icon image: {e}", file=sys.stderr)
-            else:
-                print(f"    ⚠ No PNG data for icon {elem.get('icon_name')}, skipping.", file=sys.stderr)
+                    pass
         elif elem_type == 'text':
             create_text_element(slide, elem, left, top, width, height)
             text_elements_by_position[(coords['x'], coords['y'])] = elem
         elif elem_type == 'styled_text':
             create_styled_text_element(slide, elem, left, top, width, height, text_elements_by_position)
-
 
 def apply_gradient_text_fill(run, gradient):
     """
@@ -2056,37 +2025,36 @@ def apply_gradient_text_fill(run, gradient):
     try:
         if not gradient or gradient.get('type') != 'linear' or not gradient.get('stops'):
             return False
-        
+
         stops = sorted(gradient.get('stops', []), key=lambda s: s.get('position', 0))
         if len(stops) < 2:
             return False
-        
+
         run_element = run._r
-        
+
         rPr = run_element.get_or_add_rPr()
-        
+
         from lxml import etree
         ns_a = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-        
+
         gradFills = list(rPr.findall('{%s}gradFill' % ns_a))
         for gradFill in gradFills:
             rPr.remove(gradFill)
-        
-        
+
         gradFill = etree.SubElement(rPr, '{%s}gradFill' % ns_a)
-        
+
         gsLst = etree.SubElement(gradFill, '{%s}gsLst' % ns_a)
-        
+
         for stop in stops:
             gs = etree.SubElement(gsLst, '{%s}gs' % ns_a)
             gs.set('pos', str(int(stop.get('position', 0) * 100000)))
-            
+
             solidFill = etree.SubElement(gs, '{%s}solidFill' % ns_a)
             srgbClr = etree.SubElement(solidFill, '{%s}srgbClr' % ns_a)
             stop_color = stop.get('color', {})
             r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
             srgbClr.set('val', '%02X%02X%02X' % (r, g, b))
-        
+
         lin = etree.SubElement(gradFill, '{%s}lin' % ns_a)
         angle = gradient.get('angle', 90)
         ppt_angle = (angle - 90) % 360
@@ -2095,19 +2063,15 @@ def apply_gradient_text_fill(run, gradient):
         elif angle == 180:
             ppt_angle = 270
         lin.set('ang', str(int(ppt_angle * 60000)))
-        
+
         final_gradFill = rPr.find('{%s}gradFill' % ns_a)
         if final_gradFill is None:
             return False
-        
-        
-        return True
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return False
 
+        return True
+
+    except Exception as e:
+        return False
 
 def apply_gradient_fill(shape, gradient):
     """
@@ -2117,23 +2081,23 @@ def apply_gradient_fill(shape, gradient):
     try:
         if not gradient or gradient.get('type') not in ['linear', 'radial']:
             return False
-        
+
         stops = gradient.get('stops', [])
         if len(stops) < 2:
             return False
-        
+
         stops = sorted(stops, key=lambda s: s.get('position', 0))
-        
+
         for stop in stops:
             stop['position'] = max(0.0, min(1.0, float(stop.get('position', 0))))
-        
+
         fill = shape.fill
         fill.gradient()
-        
+
         gradient_stops = fill.gradient_stops
-        
+
         num_existing_stops = len(gradient_stops)
-        
+
         if num_existing_stops > 0:
             stop0 = gradient_stops[0]
             stop0.position = stops[0]['position']
@@ -2142,7 +2106,7 @@ def apply_gradient_fill(shape, gradient):
             stop0.color.rgb = RGBColor(r, g, b)
         else:
             return False
-        
+
         if num_existing_stops > 1:
             stop1 = gradient_stops[1]
             stop1.position = stops[-1]['position']
@@ -2155,7 +2119,7 @@ def apply_gradient_fill(shape, gradient):
                 stop_color = stops[-1]['color']
                 r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
                 stop0.color.rgb = RGBColor(r, g, b)
-        
+
         if gradient['type'] == 'linear':
             angle = gradient.get('angle', 90)
             ppt_angle = (angle - 90) % 360
@@ -2167,14 +2131,11 @@ def apply_gradient_fill(shape, gradient):
                 fill.gradient_angle = ppt_angle
             except Exception as angle_error:
                 pass
-        
-        return True
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return False
 
+        return True
+
+    except Exception as e:
+        return False
 
 def create_shape_element(slide, elem, left, top, width, height):
     """Create a shape element."""
@@ -2188,7 +2149,7 @@ def create_shape_element(slide, elem, left, top, width, height):
             border_radius = 0.0
     except (ValueError, TypeError):
         border_radius = 0.0
-    
+
     if shape_type == 'triangle':
         triangle_direction = elem.get('triangle_direction', 'up')
         if triangle_direction == 'up':
@@ -2219,7 +2180,7 @@ def create_shape_element(slide, elem, left, top, width, height):
             pass
     else:
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
-    
+
     gradient = elem.get('gradient')
     gradient_applied = False
     if gradient:
@@ -2234,7 +2195,7 @@ def create_shape_element(slide, elem, left, top, width, height):
                     r, g, b = blend_transparent_color(stop_color, (255, 255, 255))
                     shape.fill.fore_color.rgb = RGBColor(r, g, b)
                     gradient_applied = True
-    
+
     if not gradient_applied:
         fill_color = elem.get('fill_color')
         if fill_color and fill_color.get('a', 0) > 0:
@@ -2253,17 +2214,17 @@ def create_shape_element(slide, elem, left, top, width, height):
                     shape.fill.background()
             else:
                 shape.fill.background()
-    
+
     borders = elem.get('borders') or {}
     has_individual_borders = borders and any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
-    
+
     # Check if all 4 sides have borders (full outline)
     has_all_four_borders = (has_individual_borders and 
                            borders.get('top') and borders.get('top').get('width', 0) > 0 and
                            borders.get('right') and borders.get('right').get('width', 0) > 0 and
                            borders.get('bottom') and borders.get('bottom').get('width', 0) > 0 and
                            borders.get('left') and borders.get('left').get('width', 0) > 0)
-    
+
     # If all 4 sides have borders with border-radius, use uniform border for proper rounding
     if has_all_four_borders and border_radius > 0:
         # Check if all borders are the same (uniform)
@@ -2271,7 +2232,7 @@ def create_shape_element(slide, elem, left, top, width, height):
         border_colors = [borders.get(side, {}).get('color') for side in ['top', 'right', 'bottom', 'left']]
         all_same_width = len(set(border_widths)) == 1
         all_same_color = len(set(str(c) for c in border_colors)) == 1
-        
+
         if all_same_width and all_same_color:
             # Uniform border with border-radius - use native border for perfect rounding
             border = borders['top']  # All sides are the same
@@ -2295,11 +2256,11 @@ def create_shape_element(slide, elem, left, top, width, height):
                 shape.line.width = Pt(px_to_pt(max_width))
     elif has_individual_borders:
         shape.line.fill.background()
-        
+
         use_rounded_borders = border_radius > 0
         min_dimension = min(coords.get('width', 0), coords.get('height', 0))
         is_rounded = border_radius > 0
-        
+
         if borders.get('top'):
             border = borders['top']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2321,7 +2282,7 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.solid()
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
-        
+
         if borders.get('right'):
             border = borders['right']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2343,7 +2304,7 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.solid()
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
-        
+
         if borders.get('bottom'):
             border = borders['bottom']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2365,7 +2326,7 @@ def create_shape_element(slide, elem, left, top, width, height):
                 line.fill.solid()
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
-        
+
         if borders.get('left'):
             border = borders['left']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2396,29 +2357,28 @@ def create_shape_element(slide, elem, left, top, width, height):
             shape.line.width = Pt(px_to_pt(border_width))
         else:
             shape.line.fill.background()
-    
-    shape.shadow.inherit = False
 
+    shape.shadow.inherit = False
 
 def create_styled_text_element(slide, elem, left, top, width, height, text_elements_by_position=None):
     """Create a styled text element (text with background/border)."""
     coords = elem['coordinates']
     border_radius = float(elem.get('border_radius', 0) or 0)
-    
+
     is_bullet = False
     bullet_text_elem = None
-    
+
     if text_elements_by_position:
         text_content = elem.get('text', '').strip()
         is_small = coords.get('width', 0) <= 60 and coords.get('height', 0) <= 60
         is_circular = border_radius >= (min(coords.get('width', 0), coords.get('height', 0)) / 2) * 0.8
         is_bullet = is_small and is_circular and (not text_content or len(text_content) <= 3)
-        
+
         if is_bullet:
             bullet_x = coords['x']
             bullet_y = coords['y']
             bullet_right = bullet_x + coords.get('width', 0)
-            
+
             for (text_x, text_y), text_elem in text_elements_by_position.items():
                 text_coords = text_elem.get('coordinates', {})
                 if (text_x >= bullet_right - 20 and text_x <= bullet_right + 100 and
@@ -2426,33 +2386,33 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                     pass
                     bullet_text_elem = text_elem
                     break
-            
+
             if not bullet_text_elem:
                 for (text_x, text_y), text_elem in text_elements_by_position.items():
                     text_coords = text_elem.get('coordinates', {})
                     text_top = text_coords.get('y', 0)
                     text_bottom = text_top + text_coords.get('height', 0)
                     bullet_center_y = bullet_y + coords.get('height', 0) / 2
-                    
+
                     if (bullet_center_y >= text_top - 10 and bullet_center_y <= text_bottom + 10 and
                         text_x > bullet_x):
                         pass
                         bullet_text_elem = text_elem
                         break
-            
+
             if bullet_text_elem:
                 text_coords = bullet_text_elem.get('coordinates', {})
                 text_font = bullet_text_elem.get('font', {})
                 text_font_size_pt = text_font.get('size', 12)
-                
+
                 text_top = pixels_to_inches(text_coords.get('y', 0))
                 text_font_size_inches = text_font_size_pt / 72.0
-                
+
                 text_first_line_center = text_top + text_font_size_inches * 0.6
-                
+
                 bullet_height_inches = height
                 top = text_first_line_center - (bullet_height_inches / 2)
-    
+
     border_radius_raw = elem.get('border_radius', 0)
     try:
         border_radius = float(border_radius_raw) if border_radius_raw is not None else 0.0
@@ -2460,7 +2420,7 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
             border_radius = 0.0
     except (ValueError, TypeError):
         border_radius = 0.0
-    
+
     if border_radius > 0:
         shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
         try:
@@ -2474,12 +2434,12 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
             pass
     else:
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
-    
+
     gradient = elem.get('gradient')
     gradient_applied = False
     if gradient:
         gradient_applied = apply_gradient_fill(shape, gradient)
-    
+
     if not gradient_applied:
         fill_color = elem.get('fill_color')
         if fill_color and fill_color.get('a', 1) > 0:
@@ -2488,31 +2448,31 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
             shape.fill.fore_color.rgb = RGBColor(r, g, b)
         else:
             shape.fill.background()
-    
+
     borders = elem.get('borders', {})
     has_individual_borders = any(borders.get(side) for side in ['top', 'right', 'bottom', 'left'])
-    
+
     all_borders_same = False
     if has_individual_borders:
         border_top = borders.get('top')
         border_right = borders.get('right')
         border_bottom = borders.get('bottom')
         border_left = borders.get('left')
-        
+
         if all([border_top, border_right, border_bottom, border_left]):
             all_same_width = (border_top.get('width') == border_right.get('width') == 
                             border_bottom.get('width') == border_left.get('width'))
             all_same_color = (border_top.get('color') == border_right.get('color') == 
                             border_bottom.get('color') == border_left.get('color'))
             all_borders_same = all_same_width and all_same_color
-    
+
     if has_individual_borders and not all_borders_same:
         shape.line.fill.background()
-        
+
         use_rounded_borders = border_radius > 0
         min_dimension = min(coords.get('width', 0), coords.get('height', 0))
         is_rounded = border_radius > 0
-        
+
         if borders.get('top'):
             border = borders['top']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2534,7 +2494,7 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.solid()
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
-        
+
         if borders.get('right'):
             border = borders['right']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2556,7 +2516,7 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.solid()
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
-        
+
         if borders.get('bottom'):
             border = borders['bottom']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2578,7 +2538,7 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 line.fill.solid()
                 line.fill.fore_color.rgb = RGBColor(r, g, b)
                 line.line.fill.background()
-        
+
         if borders.get('left'):
             border = borders['left']
             if border.get('color') and border.get('width', 0) > 0:
@@ -2610,12 +2570,12 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
             border_color = elem.get('border_color')
             border_width = elem.get('border_width', 0)
             border_style = elem.get('border_style', 'solid')
-        
+
         if border_color and border_width > 0:
             r, g, b = blend_transparent_color(border_color, (255, 255, 255))
             shape.line.color.rgb = RGBColor(r, g, b)
             shape.line.width = Pt(px_to_pt(border_width))
-            
+
             if border_style == 'dotted':
                 shape.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
             elif border_style == 'dashed':
@@ -2624,44 +2584,44 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
                 shape.line.dash_style = MSO_LINE_DASH_STYLE.SOLID
         else:
             shape.line.fill.background()
-    
+
     shape.shadow.inherit = False
-    
+
     text_frame = shape.text_frame
     text_frame.word_wrap = True
-    
+
     margin = Inches(0.01)
     text_frame.margin_left = margin
     text_frame.margin_right = margin
     text_frame.margin_top = margin
     text_frame.margin_bottom = margin
-    
+
     text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     text_frame.auto_size = MSO_AUTO_SIZE.NONE
-    
+
     text_frame.text = elem['text']
-    
+
     font_name = {'Arial': 'Arial', 'Proxima Nova': 'Calibri', 'Roboto': 'Calibri'}.get(elem['font'].get('family', 'Arial'), 'Calibri')
     font_weight = str(elem['font']['weight'])
     is_bold = font_weight in ['bold', '700', '800', '900'] or (font_weight.isdigit() and int(font_weight) >= 700)
     font_style = elem['font'].get('style', 'normal')
     is_italic = font_style == 'italic'
     color = elem['color']
-    
+
     for paragraph in text_frame.paragraphs:
         # Use the alignment from the element
         # Default to center for styled_text elements (badges, pills, buttons with backgrounds)
         alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
         stored_alignment = elem.get('alignment', 'center')  # Default to center for styled text elements
-        
+
         # For very small badges/pills or pill-shaped elements (rounded-full), always center
         text_content = elem.get('text', '').strip()
         is_small_badge = len(text_content) <= 3 and coords.get('width', 0) <= 60 and coords.get('height', 0) <= 60
-        
+
         # Check if this is a pill/capsule shape (border-radius >= 50% of height)
         elem_height = coords.get('height', 0)
         is_pill_shape = border_radius > 0 and elem_height > 0 and border_radius >= (elem_height / 2) * 0.9
-        
+
         if is_small_badge or is_pill_shape:
             # Small badges and pill-shaped elements should always be centered
             paragraph.alignment = PP_ALIGN.CENTER
@@ -2678,13 +2638,12 @@ def create_styled_text_element(slide, elem, left, top, width, height, text_eleme
             r, g, b = blend_transparent_color(color, (255, 255, 255))
             run.font.color.rgb = RGBColor(r, g, b)
 
-
 def create_table_element(slide, elem):
     """Create table elements cell by cell."""
     rows = elem.get('rows', [])
     if not rows:
         return
-    
+
     for row in rows:
         for cell in row:
             coords = cell['coordinates']
@@ -2692,7 +2651,7 @@ def create_table_element(slide, elem):
             top = pixels_to_inches(coords['y'])
             width = pixels_to_inches(coords['width'])
             height = pixels_to_inches(coords['height'])
-            
+
             bg_color = cell.get('bg_color')
             if bg_color and bg_color.get('a', 0) >= 0:
                 bg_shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left), Inches(top), Inches(width), Inches(height))
@@ -2701,47 +2660,47 @@ def create_table_element(slide, elem):
                 bg_shape.fill.fore_color.rgb = RGBColor(r, g, b)
                 bg_shape.line.fill.background()
                 bg_shape.shadow.inherit = False
-            
+
             def create_border_line(x1, y1, x2, y2, color, width, style):
                 from pptx.enum.shapes import MSO_CONNECTOR
                 line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
                 r, g, b = blend_transparent_color(color, (255, 255, 255))
                 line.line.color.rgb = RGBColor(r, g, b)
                 line.line.width = Pt(px_to_pt(width))
-                
+
                 line.shadow.inherit = False
-                
+
                 if style == 'dotted':
                     line.line.dash_style = MSO_LINE_DASH_STYLE.ROUND_DOT
                 elif style == 'dashed':
                     line.line.dash_style = MSO_LINE_DASH_STYLE.DASH
                 else:
                     line.line.dash_style = MSO_LINE_DASH_STYLE.SOLID
-            
+
             border_bottom_color = cell.get('border_bottom_color')
             if border_bottom_color and cell.get('border_bottom_width', 0) > 0:
                 create_border_line(left, top + height, left + width, top + height,
                                    border_bottom_color, cell.get('border_bottom_width', 0),
                                    cell.get('border_bottom_style', 'solid'))
-            
+
             border_left_color = cell.get('border_left_color')
             if border_left_color and cell.get('border_left_width', 0) > 0:
                 create_border_line(left, top, left, top + height,
                                    border_left_color, cell.get('border_left_width', 0),
                                    cell.get('border_left_style', 'solid'))
-            
+
             border_right_color = cell.get('border_right_color')
             if border_right_color and cell.get('border_right_width', 0) > 0:
                 create_border_line(left + width, top, left + width, top + height,
                                    border_right_color, cell.get('border_right_width', 0),
                                    cell.get('border_right_style', 'solid'))
-            
+
             border_top_color = cell.get('border_top_color')
             if border_top_color and cell.get('border_top_width', 0) > 0:
                 create_border_line(left, top, left + width, top,
                                    border_top_color, cell.get('border_top_width', 0),
                                    cell.get('border_top_style', 'solid'))
-            
+
             pseudo_right = cell.get('pseudo_separator_right')
             if pseudo_right and pseudo_right.get('color'):
                 color = pseudo_right['color']
@@ -2749,7 +2708,7 @@ def create_table_element(slide, elem):
                     create_border_line(left + width, top, left + width, top + height,
                                        color, pseudo_right.get('width', 2),
                                        pseudo_right.get('style', 'dotted'))
-            
+
             pseudo_left = cell.get('pseudo_separator_left')
             if pseudo_left and pseudo_left.get('color'):
                 color = pseudo_left['color']
@@ -2757,25 +2716,25 @@ def create_table_element(slide, elem):
                     create_border_line(left, top, left, top + height,
                                        color, pseudo_left.get('width', 2),
                                        pseudo_left.get('style', 'dotted'))
-            
+
             textbox = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
             text_frame = textbox.text_frame
             text_frame.text = cell['text']
             text_frame.word_wrap = True
-            
+
             text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
-            
+
             paragraph = text_frame.paragraphs[0]
             alignment = cell.get('alignment', 'left')
             is_header = cell.get('is_header', False)
-            
+
             if is_header:
                 side_margin = Inches(0.05)
                 vert_margin = Inches(0.03)
             else:
                 side_margin = Inches(0.05)
                 vert_margin = Inches(0.02)
-            
+
             if alignment == 'center':
                 paragraph.alignment = PP_ALIGN.CENTER
                 text_frame.margin_left = side_margin
@@ -2792,15 +2751,15 @@ def create_table_element(slide, elem):
                 paragraph.alignment = PP_ALIGN.LEFT
                 text_frame.margin_left = Inches(0.05)
                 text_frame.margin_right = side_margin
-            
+
             text_frame.margin_top = vert_margin
             text_frame.margin_bottom = vert_margin
-            
+
             if paragraph.runs:
                 run = paragraph.runs[0]
                 run.font.size = Pt(int(cell.get('font_size', 12) * 0.75))
                 run.font.name = 'Calibri'
-                
+
                 if cell.get('is_header'):
                     run.font.bold = True
                 else:
@@ -2808,16 +2767,15 @@ def create_table_element(slide, elem):
                     is_bold = font_weight in ['bold', '700', '800', '900'] or (font_weight.isdigit() and int(font_weight) >= 700)
                     if is_bold:
                         run.font.bold = True
-                
+
                 font_style = cell.get('font_style', 'normal')
                 if font_style == 'italic':
                     run.font.italic = True
-                
+
                 color = cell.get('color', {'r': 0, 'g': 0, 'b': 0})
                 if color:
                     r, g, b = blend_transparent_color(color, (255, 255, 255))
                     run.font.color.rgb = RGBColor(r, g, b)
-
 
 def compress_image(img_stream, max_width=1920, max_height=1080, quality=85, maintain_dimensions=False):
     """
@@ -2826,25 +2784,25 @@ def compress_image(img_stream, max_width=1920, max_height=1080, quality=85, main
     - Converts to JPEG with quality setting for better compression
     - Falls back to PNG for images with transparency
     - Handles all formats including WEBP
-    
+
     Args:
         maintain_dimensions: If True, don't resize - only convert format and optimize
-    
+
     Returns a new BytesIO stream with compressed image data.
     """
     try:
         img_stream.seek(0)
         img = Image.open(img_stream)
-        
+
         # Force load the image data to handle lazy-loading formats like WEBP
         img.load()
-        
+
         original_format = img.format  # Store original format for debugging
         original_size = img_stream.getbuffer().nbytes
-        
+
         # Check if image has transparency
         has_transparency = img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info)
-        
+
         # Resize if image is too large (only if maintain_dimensions is False)
         if not maintain_dimensions and (img.width > max_width or img.height > max_height):
             # Calculate scaling factor maintaining aspect ratio
@@ -2852,10 +2810,10 @@ def compress_image(img_stream, max_width=1920, max_height=1080, quality=85, main
             new_width = int(img.width * scale)
             new_height = int(img.height * scale)
             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
+
         # Create output stream
         output_stream = io.BytesIO()
-        
+
         # Save with appropriate format
         if has_transparency:
             # Keep transparency, use PNG with optimization
@@ -2881,31 +2839,27 @@ def compress_image(img_stream, max_width=1920, max_height=1080, quality=85, main
                 img = rgb_img
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
-            
+
             img.save(output_stream, format='JPEG', quality=quality, optimize=True)
             output_format = 'JPEG'
-        
+
         output_stream.seek(0)
         compressed_size = output_stream.getbuffer().nbytes
-        
+
         # For unsupported formats like WEBP, always convert regardless of size
         if original_format in ('WEBP', 'AVIF'):
             return output_stream
-        
+
         # For supported formats, only use compressed version if it's actually smaller
         if compressed_size < original_size:
             return output_stream
         else:
             img_stream.seek(0)
             return img_stream
-            
+
     except Exception as e:
-        # If compression fails, return original stream
-        import traceback
-        traceback.print_exc()
         img_stream.seek(0)
         return img_stream
-
 
 def convert_image_to_png(img_stream):
     """
@@ -2916,7 +2870,7 @@ def convert_image_to_png(img_stream):
         # Open the image from the stream
         img_stream.seek(0)
         img = Image.open(img_stream)
-        
+
         # Convert to RGB if necessary (WEBP with alpha needs RGBA)
         if img.mode in ('RGBA', 'LA', 'P'):
             # Keep alpha channel
@@ -2924,7 +2878,7 @@ def convert_image_to_png(img_stream):
                 img = img.convert('RGBA')
         elif img.mode != 'RGB':
             img = img.convert('RGB')
-        
+
         # Create a new BytesIO stream for PNG output
         png_stream = io.BytesIO()
         img.save(png_stream, format='PNG')
@@ -2935,14 +2889,13 @@ def convert_image_to_png(img_stream):
         img_stream.seek(0)
         return img_stream
 
-
 def create_image_element(slide, elem, left, top, width, height):
     """Create an image element."""
     try:
         img_src = elem.get('src', '')
         if not img_src:
             return
-        
+
         # Ensure width and height are valid - use natural dimensions as fallback
         if width <= 0 or height <= 0:
             natural_width = elem.get('natural_width', 0)
@@ -2955,12 +2908,11 @@ def create_image_element(slide, elem, left, top, width, height):
                 # Use minimum default size to avoid skipping
                 width = max(width, 0.5)
                 height = max(height, 0.5)
-        
-        
+
         natural_width = elem.get('natural_width')
         natural_height = elem.get('natural_height')
         object_fit = elem.get('object_fit', 'fill')
-        
+
         # Only adjust dimensions for 'contain' object-fit to maintain aspect ratio within container
         # For all other cases, use the display dimensions as specified (PowerPoint will scale the image)
         if object_fit == 'contain' and natural_width and natural_height and natural_width > 0 and natural_height > 0:
@@ -2977,7 +2929,7 @@ def create_image_element(slide, elem, left, top, width, height):
                 w_new = height * natural_aspect
                 left += (width - w_new) / 2
                 width = w_new
-        
+
         is_circle = elem.get('is_circle', False)
         pic = None
         if img_src.startswith('data:image'):
@@ -2991,8 +2943,7 @@ def create_image_element(slide, elem, left, top, width, height):
                 compressed_size = img_stream.getbuffer().nbytes
                 pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
             except Exception as e:
-                import traceback
-                traceback.print_exc()
+                pass
         elif img_src.startswith('http'):
             try:
                 req = urllib.request.Request(img_src, headers={'User-Agent': 'Mozilla/5.0'})
@@ -3006,8 +2957,6 @@ def create_image_element(slide, elem, left, top, width, height):
                         img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
                         pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
             except Exception as e:
-                import traceback
-                traceback.print_exc()
                 pic = None
         elif os.path.exists(img_src):
             try:
@@ -3019,12 +2968,10 @@ def create_image_element(slide, elem, left, top, width, height):
                     img_stream = compress_image(img_stream, maintain_dimensions=True, quality=85)
                     pic = slide.shapes.add_picture(img_stream, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
             except Exception as e:
-                import traceback
-                traceback.print_exc()
                 pic = None
         else:
             pass
-        
+
         # Apply border-radius to image if present
         if pic:
             try:
@@ -3034,43 +2981,43 @@ def create_image_element(slide, elem, left, top, width, height):
                     border_radius_px = float(border_radius_px) if border_radius_px else 0
                 except (ValueError, TypeError):
                     border_radius_px = 0
-                    
+
                 # Also check for is_circle flag - if true, make it fully circular
                 is_circle = elem.get('is_circle', False)
-                
+
                 if is_circle or border_radius_px > 0:
                     # Get element coordinates for proper dimension calculation
                     coords = elem.get('coordinates', {})
                     elem_width_px = coords.get('width', 0)
                     elem_height_px = coords.get('height', 0)
-                    
+
                     if elem_width_px > 0 and elem_height_px > 0:
                         min_dimension_px = min(elem_width_px, elem_height_px)
-                        
+
                         # For circles, use maximum radius (50% of min dimension)
                         if is_circle:
                             border_radius_px = min_dimension_px / 2
-                        
+
                         # PowerPoint adjustment: 0-50000 where 50000 = radius is half of min dimension
                         # adjustment_ratio: 0.0 = no rounding, 1.0 = maximum rounding (radius = min_dim/2)
                         max_radius_px = min_dimension_px / 2
                         adjustment_ratio = min(border_radius_px / max_radius_px, 1.0) if max_radius_px > 0 else 0
-                        
+
                         # Convert to PowerPoint adjustment value (0-50000)
                         adjustment_value = int(adjustment_ratio * 50000)
-                        
+
                         if adjustment_value > 0:
                             # Apply rounded rectangle corners to picture using XML
                             from pptx.oxml import parse_xml
                             spPr = pic._element.spPr
-                            
+
                             # Pictures need the prstGeom to be inserted in the correct position
                             # Remove any existing geometry elements (custGeom or prstGeom)
                             for child in list(spPr):
                                 tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
                                 if tag_name in ('custGeom', 'prstGeom'):
                                     spPr.remove(child)
-                            
+
                             # Create rounded rectangle geometry (or ellipse for perfect circles)
                             if is_circle and adjustment_ratio >= 0.99:
                                 # Use ellipse for perfect circles
@@ -3082,7 +3029,7 @@ def create_image_element(slide, elem, left, top, width, height):
                                                     f'<a:gd name="adj" fmla="val {adjustment_value}"/>' +
                                                     '</a:avLst>' +
                                                     '</a:prstGeom>')
-                            
+
                             # Insert geometry as first child of spPr (after xfrm if present)
                             # Find xfrm position
                             xfrm_index = -1
@@ -3091,15 +3038,14 @@ def create_image_element(slide, elem, left, top, width, height):
                                 if tag_name == 'xfrm':
                                     xfrm_index = i
                                     break
-                            
+
                             if xfrm_index >= 0:
                                 spPr.insert(xfrm_index + 1, prstGeom)
                             else:
                                 spPr.insert(0, prstGeom)
             except Exception as e:
-                import traceback
-                traceback.print_exc()
-        
+                pass
+
         # Note: Images are now placed in the correct z-order from extraction
         # No need to force them to top - respect the natural layering from the browser
         # if pic:
@@ -3110,9 +3056,7 @@ def create_image_element(slide, elem, left, top, width, height):
         #     except Exception as e:
         #         pass
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-
+        pass
 
 def create_text_element(slide, elem, left, top, width, height):
     """Create a text element."""
@@ -3120,22 +3064,22 @@ def create_text_element(slide, elem, left, top, width, height):
     text_frame = textbox.text_frame
     text_frame.text = elem['text']
     text_frame.word_wrap = True
-    
+
     if len(elem['text'].strip()) <= 3:
         text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     else:
         text_frame.vertical_anchor = MSO_ANCHOR.TOP
-    
+
     alignment_map = {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER, 'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY, 'start': PP_ALIGN.LEFT, 'end': PP_ALIGN.RIGHT}
     text_alignment = alignment_map.get(elem.get('alignment', 'left'), PP_ALIGN.LEFT)
-    
+
     margin = Inches(0.01) if text_alignment in [PP_ALIGN.LEFT, PP_ALIGN.RIGHT] else Inches(0)
     text_frame.margin_left = margin if text_alignment == PP_ALIGN.LEFT else 0
     text_frame.margin_right = margin if text_alignment == PP_ALIGN.RIGHT else 0
     text_frame.margin_top = 0
     text_frame.margin_bottom = 0
     text_frame.auto_size = MSO_AUTO_SIZE.NONE
-    
+
     font_name = {'Arial': 'Arial', 'Calibri': 'Calibri', 'Times New Roman': 'Times New Roman'}.get(elem['font'].get('family', 'Arial'), 'Calibri')
     font_weight = str(elem['font']['weight'])
     is_bold = font_weight in ['bold', '700', '800', '900'] or (font_weight.isdigit() and int(font_weight) >= 700)
@@ -3143,10 +3087,10 @@ def create_text_element(slide, elem, left, top, width, height):
     is_italic = font_style == 'italic'
     color = elem['color']
     text_gradient = elem.get('text_gradient')
-    
+
     for paragraph in text_frame.paragraphs:
         paragraph.alignment = text_alignment
-        
+
         for run in paragraph.runs:
             run.font.size = Pt(elem['font']['size'])
             run.font.name = font_name
@@ -3154,20 +3098,20 @@ def create_text_element(slide, elem, left, top, width, height):
                 run.font.bold = True
             if is_italic:
                 run.font.italic = True
-            
+
             if text_gradient and text_gradient.get('stops'):
                 stops = sorted(text_gradient.get('stops', []), key=lambda s: s.get('position', 0))
                 if stops and stops[0].get('color'):
                     gradient_color = stops[0]['color']
                 else:
                     gradient_color = color
-                
+
                 r, g, b = blend_transparent_color(gradient_color, (255, 255, 255))
                 run.font.color.rgb = RGBColor(r, g, b)
             else:
                 r, g, b = blend_transparent_color(color, (255, 255, 255))
                 run.font.color.rgb = RGBColor(r, g, b)
-    
+
     border_color = elem.get('border_color')
     if border_color and elem.get('border_width', 0) > 0:
         r, g, b = blend_transparent_color(border_color, (255, 255, 255))
@@ -3176,15 +3120,14 @@ def create_text_element(slide, elem, left, top, width, height):
     else:
         textbox.line.fill.background()
 
-
 def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     """Create a picture shape from image element."""
     media = elem.get('media', {})
     img_src = media.get('image_src', '')
-    
+
     if not img_src:
         return
-    
+
     try:
         pic = None
         if img_src.startswith('http'):
@@ -3202,7 +3145,7 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 left_emu, top_emu,
                 width=width_emu, height=height_emu
             )
-        
+
         if pic:
             link_data = elem.get('link', {})
             if link_data.get('href'):
@@ -3211,14 +3154,14 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                     pic.click_action.hyperlink.address = link_data['href']
                 except:
                     pass
-            
+
             opacity = elem.get('opacity')
             if opacity is not None and opacity < 1:
                 try:
                     pic.fill.transparency = 1 - opacity
                 except:
                     pass
-            
+
             media = elem.get('media', {})
             if media.get('is_circle'):
                 try:
@@ -3235,7 +3178,7 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                     spPr.insert(0, prstGeom)
                 except:
                     pass
-            
+
             if media.get('object_fit') == 'contain':
                 natural_width = media.get('image_natural_width_px', 0)
                 natural_height = media.get('image_natural_height_px', 0)
@@ -3243,11 +3186,11 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                     bounds = elem.get('bounds', {})
                     display_width_px = bounds.get('width', 0)
                     display_height_px = bounds.get('height', 0)
-                    
+
                     if display_width_px > 0 and display_height_px > 0:
                         natural_aspect = natural_width / natural_height
                         display_aspect = display_width_px / display_height_px
-                        
+
                         if natural_aspect > display_aspect:
                             new_height_px = display_width_px / natural_aspect
                             new_height_emu = px_to_emu_y(new_height_px)
@@ -3261,24 +3204,23 @@ def create_image_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     except Exception as e:
         pass
 
-
 def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     """Create a text box from text element."""
     text_data = elem.get('text', {})
     if not text_data:
         return
-    
+
     padding = elem.get('padding', {})
     padding_left_px = padding.get('left', 0)
     padding_top_px = padding.get('top', 0)
     padding_right_px = padding.get('right', 0)
     padding_bottom_px = padding.get('bottom', 0)
-    
+
     adjusted_left_emu = left_emu + px_to_emu_x(padding_left_px)
     adjusted_top_emu = top_emu + px_to_emu_y(padding_top_px)
     adjusted_width_emu = width_emu - px_to_emu_x(padding_left_px + padding_right_px)
     adjusted_height_emu = height_emu - px_to_emu_y(padding_top_px + padding_bottom_px)
-    
+
     if adjusted_width_emu <= 0 or adjusted_height_emu <= 0:
         adjusted_left_emu = left_emu
         adjusted_top_emu = top_emu
@@ -3287,17 +3229,17 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     else:
         adjusted_width_emu = max(adjusted_width_emu, px_to_emu_x(10))
         adjusted_height_emu = max(adjusted_height_emu, px_to_emu_y(10))
-    
+
     if adjusted_left_emu < 0:
         adjusted_left_emu = 0
     if adjusted_top_emu < 0:
         adjusted_top_emu = 0
-    
+
     textbox = slide.shapes.add_textbox(
         adjusted_left_emu, adjusted_top_emu,
         adjusted_width_emu, adjusted_height_emu
     )
-    
+
     fill_data = elem.get('fill', {})
     bg_image_url = fill_data.get('background_image_url')
     if not bg_image_url:
@@ -3312,7 +3254,7 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 textbox.fill.background()
             except:
                 pass
-    
+
     opacity = elem.get('opacity')
     if opacity is not None and opacity < 1:
         try:
@@ -3320,7 +3262,7 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 textbox.fill.transparency = 1 - opacity
         except:
             pass
-    
+
     link_data = elem.get('link', {})
     if link_data.get('href'):
         try:
@@ -3328,27 +3270,27 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             textbox.click_action.hyperlink.address = link_data['href']
         except:
             pass
-    
+
     text_frame = textbox.text_frame
     text_content = text_data.get('content', '').strip()
     if not text_content:
         return
     text_frame.text = text_content
     text_frame.word_wrap = True
-    
+
     text_frame.margin_left = 0
     text_frame.margin_right = 0
     text_frame.margin_top = 0
     text_frame.margin_bottom = 0
-    
+
     if elem.get('border') or elem.get('fill', {}).get('background_image_url'):
         try:
             textbox.fill.background()
         except:
             pass
-    
+
     p = text_frame.paragraphs[0]
-    
+
     align_map = {
         'left': PP_ALIGN.LEFT,
         'center': PP_ALIGN.CENTER,
@@ -3356,7 +3298,7 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
         'justify': PP_ALIGN.JUSTIFY
     }
     p.alignment = align_map.get(text_data.get('text_align', 'left').lower(), PP_ALIGN.LEFT)
-    
+
     line_height = text_data.get('line_height', 'normal')
     if line_height and line_height != 'normal':
         try:
@@ -3379,36 +3321,35 @@ def create_text_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 p.line_spacing = line_height_pt - font_size_pt
         except Exception as e:
             pass
-    
+
     if p.runs:
         run = p.runs[0]
     else:
         run = p.add_run()
-    
+
     font_family = text_data.get('font_family', 'Calibri')
     run.font.name = font_family
     run.font.size = Pt(px_to_pt(text_data.get('font_size_px', 12)))
-    
+
     font_weight = text_data.get('font_weight', 'normal')
     if font_weight in ['bold', '700', '800', '900'] or \
        (isinstance(font_weight, str) and font_weight.isdigit() and int(font_weight) >= 700):
         run.font.bold = True
-    
+
     if text_data.get('font_style') == 'italic':
         run.font.italic = True
-    
+
     text_decoration = text_data.get('text_decoration', '') or text_data.get('text_decoration_line', '')
     if text_decoration:
         if 'underline' in text_decoration.lower():
             run.font.underline = True
         if 'line-through' in text_decoration.lower() or 'strikethrough' in text_decoration.lower():
             run.font.strike = True
-    
+
     color_rgba = text_data.get('color_rgba', 'rgba(0,0,0,1)')
     rgb = rgba_to_rgb(color_rgba)
     if rgb:
         run.font.color.rgb = RGBColor(rgb[0], rgb[1], rgb[2])
-
 
 def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     """Create a shape (rectangle) from element with fill/border."""
@@ -3416,14 +3357,14 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
     bounds = elem.get('bounds', {})
     width_px = bounds.get('width', 0)
     height_px = bounds.get('height', 0)
-    
+
     radius_tl = border.get('radius_top_left_px', 0)
     radius_tr = border.get('radius_top_right_px', 0)
     radius_br = border.get('radius_bottom_right_px', 0)
     radius_bl = border.get('radius_bottom_left_px', 0)
-    
+
     max_radius = max(radius_tl, radius_tr, radius_br, radius_bl)
-    
+
     is_circle = False
     if width_px > 0 and height_px > 0:
         aspect_ratio = width_px / height_px
@@ -3431,12 +3372,12 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
         min_dimension = min(width_px, height_px)
         avg_radius = (radius_tl + radius_tr + radius_br + radius_bl) / 4
         is_circle = is_squareish and avg_radius >= (min_dimension / 2) * 0.8
-    
+
     is_rounded = False
     if width_px > 0 and height_px > 0:
         min_dimension = min(width_px, height_px)
         is_rounded = max_radius > (min_dimension * 0.02) or max_radius > 5
-    
+
     if is_circle:
         shape = slide.shapes.add_shape(
             MSO_SHAPE.OVAL,
@@ -3455,10 +3396,10 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             left_emu, top_emu,
             width_emu, height_emu
         )
-    
+
     fill_data = elem.get('fill', {})
     bg_image_url = fill_data.get('background_image_url')
-    
+
     if bg_image_url:
         try:
             if bg_image_url.startswith('http'):
@@ -3494,7 +3435,7 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
                 return
         except Exception as e:
             pass
-    
+
     bg_color_rgba = fill_data.get('background_color_rgba')
     if bg_color_rgba:
         rgb = rgba_to_rgb(bg_color_rgba)
@@ -3503,36 +3444,36 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             shape.fill.fore_color.rgb = RGBColor(rgb[0], rgb[1], rgb[2])
     else:
         shape.fill.background()
-    
+
     opacity = elem.get('opacity')
     if opacity is not None and opacity < 1:
         try:
             shape.fill.transparency = 1 - opacity
         except:
             pass
-    
+
     if border:
         borders = ['top', 'right', 'bottom', 'left']
         max_border = None
         max_width = 0
-        
+
         for side in borders:
             side_border = border.get(side, {})
             width = side_border.get('width', 0) or side_border.get('width_px', 0)
             if width > max_width:
                 max_width = width
                 max_border = side_border
-        
+
         if max_border and max_width > 0:
             border_color_rgba = max_border.get('color', '') or max_border.get('color_rgba', '')
             border_style = max_border.get('style', 'solid')
-            
+
             if border_color_rgba:
                 rgb = rgba_to_rgb(border_color_rgba)
                 if rgb:
                     shape.line.color.rgb = RGBColor(rgb[0], rgb[1], rgb[2])
                     shape.line.width = Pt(px_to_pt(max_width))
-                    
+
                     if 'dashed' in border_style.lower():
                         try:
                             shape.line.dash_style = MSO_LINE_DASH_STYLE.DASH
@@ -3547,7 +3488,7 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             shape.line.fill.background()
     else:
         shape.line.fill.background()
-    
+
     shadow_data = elem.get('shadow', {})
     if shadow_data.get('box_shadow'):
         try:
@@ -3558,7 +3499,7 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             pass
     else:
         shape.shadow.inherit = False
-    
+
     link_data = elem.get('link', {})
     if link_data.get('href'):
         try:
@@ -3566,7 +3507,6 @@ def create_shape(slide, elem, left_emu, top_emu, width_emu, height_emu):
             shape.click_action.hyperlink.address = link_data['href']
         except:
             pass
-
 
 async def convert_json_to_pptx(json_source):
     """
@@ -3576,7 +3516,7 @@ async def convert_json_to_pptx(json_source):
     """
     # Trim whitespace and check if it's a URL
     json_source = str(json_source).strip()
-    
+
     if json_source.startswith('http://') or json_source.startswith('https://'):
         # Download JSON from URL
         req = urllib.request.Request(json_source, headers={'User-Agent': 'Mozilla/5.0'})
@@ -3586,44 +3526,39 @@ async def convert_json_to_pptx(json_source):
         # Read JSON from local file
         with open(json_source, 'r') as f:
             slides_data = json.load(f)
-    
+
     prs = Presentation()
     prs.slide_width = Inches(SLIDE_WIDTH_INCHES)
     prs.slide_height = Inches(SLIDE_HEIGHT_INCHES)
-    
+
     for idx, slide_obj in enumerate(slides_data, 1):
         slide_id = slide_obj.get('id', f'slide_{idx}')
         html_content = slide_obj['html']
-        
+
         # Unescape newlines if they're escaped in the JSON
         html_content = html_content.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
-        
+
         elements_json = await extract_elements_from_html(html_content)
-        
+
         create_pptx_from_elements(prs, elements_json)
-    
+
     pptx_buffer = io.BytesIO()
     prs.save(pptx_buffer)
     pptx_buffer.seek(0)
-    
+
     b64_data = base64.b64encode(pptx_buffer.read()).decode('utf-8')
     print(b64_data)
-
 
 async def main():
     if len(sys.argv) < 2:
         sys.exit(1)
-    
+
     json_source = sys.argv[1]
-    
+
     try:
         await convert_json_to_pptx(json_source)
     except Exception as e:
-        sys.stderr.write(f"Error: {e}\n")
-        import traceback
-        traceback.print_exc()
         sys.exit(1)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
